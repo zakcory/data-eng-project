@@ -9,7 +9,7 @@ MAIN IDEA: after training the model with the initial label set, build a graph th
 
 
 1. train with the seed set
-2. use the penultimate layer of the GNN to extract features
+2. use the penultimate layer of the CNN to extract features
 3. use the features to make a similarity matrix (if too large, build an index)
 4. build a graph according to the similarities (10-15 NN)
 5. train the GNN (use only the seed set for training), propagate the labels
