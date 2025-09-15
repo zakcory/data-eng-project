@@ -1,0 +1,9 @@
+We are using the following datasets: 
+
+Text:
+AG's News Topic Classification Dataset - https://www.kaggle.com/datasets/amananandrai/ag-news-classification-dataset?resource=download&select=train.csv
+IMDB Dataset of 50K Movie Reviews - https://www.kaggle.com/datasets/lakshmi25npathi/imdb-dataset-of-50k-movie-reviews
+Fake News Classification - https://www.kaggle.com/datasets/saurabhshahane/fake-news-classification
+
+Tabular:
+Credit Card Fraud Detection - https://www.kaggle.com/datasets/mlg-ulb/creditcardfraud
