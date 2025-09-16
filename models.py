@@ -5,10 +5,13 @@ import torch_geometric
 import torch.nn.functional as F
 import torch.nn as nn
 from torchvision import models
+import numpy as np
+import torch.optim
 
 
 
 # TODO: ADD MODELS HERE
+
 
 # GNN model (for active learning)
 class GraphSAGE(torch.nn.Module):
@@ -23,6 +26,42 @@ class GraphSAGE(torch.nn.Module):
         x = x.relu()
         x = self.conv2(x, edge_index)
         return x
+    
+# training function for the GNN model
+def train_gnn_model(model, data, cfg):
+
+    optimizer = torch.optim.Adam(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
+    criterion = torch.nn.CrossEntropyLoss()
+
+    loss_steps = list()
+    best_val_acc = 0
+    best_loss = np.inf
+    for epoch in range(1, cfg.epochs+1):
+
+        model.train()
+        optimizer.zero_grad()
+        out = model(data.x, data.edge_index)
+        loss = criterion(out[data.train_mask], data.y[data.train_mask])
+        loss.backward()
+        optimizer.step()
+
+        with torch.no_grad():
+            logits = model(data.x, data.edge_index)
+        val_acc = accuracy(logits[data.valid_mask], data.y[data.valid_mask])
+
+        if val_acc > best_val_acc:
+            best_val_acc = val_acc
+            best_loss = loss.item()
+            torch.save({'model_state': model.state_dict(), 'optim_state': optimizer.state_dict()}, cfg.ckpt_dir)
+    
+        if epoch % cfg.log_every == 0 or epoch == 1:
+            print(f"Epoch: {epoch:03d}  "
+                  f"Best Val Acc: {best_val_acc:.4f}  "
+                  f"Best Loss: {best_loss:.4f}  "
+            )
+        loss_steps.append(loss.item())
+    return loss_steps, model
+
     
 
 # CNN model (for CIFAR10)
@@ -72,7 +111,7 @@ def train_model_wrapper(X_train, y_train, model):
 
 
 class TrainConfig:
-    def __init__(self, epochs, lr, weight_decay, momentum, batch_size, ckpt_dir, log_every):
+    def __init__(self, epochs, lr, weight_decay, momentum, optimizer, batch_size, ckpt_dir, log_every):
        self.epochs = epochs 
        self.lr = lr
        self.weight_decay = weight_decay
@@ -82,3 +121,13 @@ class TrainConfig:
        self.log_every = log_every
     def __repr__(self):
         print(f"Train Config: epochs={self.epochs}, lr={self.lr}, bs={self.batch_size}, log every {self.log_every}")
+
+
+
+# useful functions for models
+
+@torch.no_grad()
+def accuracy(logits, y):
+    pred = logits.argmax(dim=11)
+    y = y.view(-1)
+    return (pred == y).float().mean().item()
