@@ -9,24 +9,27 @@ from models import *
 
 class ActiveLearningPipeline:
     def __init__(self, seed,
-                 test_indices,
-                 available_pool_indices,
-                 train_indices,
+                 feature_vectors,
+                 labels,
                  selection_criterion,
                  dataset_name,
                  model_name,
-                 iterations=10,
-                 budget_per_iter=30
+                 train_config,
+                 iterations=20,
+                 budget_per_iter=0.01,
+                 test_ratio = 0.2
                  ):
         self.seed = seed
+        self.feature_vectors = feature_vectors
+        self.labels = labels
         self.iterations = iterations
         self.budget_per_iter = budget_per_iter
-        self.available_pool_indices = available_pool_indices
-        self.train_indices = train_indices
-        self.test_indices = test_indices
+        self.train_indices, self.test_indices, self.available_pool_indices = self._split_points
+        self.train_config = train_config
         self.selection_criterion = selection_criterion
         self.dataset_name = dataset_name
         self.model_name = model_name
+        self.test_ratio = test_ratio
 
     def run_pipeline(self):
         """
@@ -45,14 +48,29 @@ class ActiveLearningPipeline:
             print('----------------------------------------')
             self._update_params(trained_model)
         return accuracy_scores
+    
+    def _split_points(self):
+        # pick test indices
+        total_size = len(self.labels)
+        total_indices = list(range(total_size))
+        test_indices = np.random.choice(total_indices, size=self.test_ratio, replace=False)
+
+        # adjust ratio and pick init train indices
+        left_indices = set(total_indices) - set(test_indices)
+        init_train_adj_ratio = self.budget_per_iter / self.test_ratio
+        init_train_indices = np.random.choice(left_indices, size=init_train_adj_ratio, replace=False)
+
+        # pool indices are whats left
+        available_pool_indices = list(set(test_indices) - set(init_train_indices))
+
+        return init_train_indices, test_indices, available_pool_indices
 
     def _train_model(self):
         """
         Train the model
         """
         model = load_model_wrapper('CNN')
-        train_indices = [self.node_id_mapping[node_id] for node_id in self.train_indices]
-        return train_model_wrapper(self.feature_vectors[train_indices], self.labels[train_indices], model)
+        return train_model_wrapper(self.feature_vectors[train_indices], self.labels[train_indices], model, self.train_config)
 
     def _random_sampling(self):
         """
@@ -132,27 +150,32 @@ class ActiveLearningPipeline:
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--indices_dict_path', type=str, default='indices_dict_part1.pkl')
+    
+    # pipeline configs
     parser.add_argument('--iterations', type=int, default=20)
-    parser.add_argument('--budget_per_iter', type=int, default=30)
+    parser.add_argument('--budget_per_iter_ratio', type=float, default=0.01)
+    parser.add_argument("--test_ratio", type=float, default=0.2)
+    # training model configs
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--weight_decay", type=float, default=5e-4)
     parser.add_argument("--momentum", type=float, default=0.9)
     parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument("--ckpt_dir", type=str, default="./ckpts")
-
+    parser.add_argument("--log_every", type=int, default=10)
     # model and dataset name
     parser.add_argument('--model_name', type=str, required=True)
-    parser.add_argument('--dataset_name', type=str, required=True)
+    parser.add_argument('--dataset_name', type=str, required=True)    
 
-    # decide the initial test/train split
     hp = parser.parse_args()
     with open(hp.indices_dict_path, 'rb') as f:
         indices_dict = pickle.load(f)
     available_pool_indices = indices_dict['available_pool_indices']
     train_indices = indices_dict['train_indices']
     test_indices = indices_dict['test_indices']
+
+    # add training config into a configurator
+    train_config = TrainConfig(hp.epochs, hp.lr, hp.weight_decay, hp.momentum, hp.batch_size, hp.ckpt_dir, hp.log_every) 
 
     # TODO: add more criterias here
     selection_criteria = ['custom', 'random']
@@ -170,8 +193,10 @@ if __name__ == '__main__':
                                               selection_criterion=criterion,
                                               dataset_name=hp.dataset_name,
                                               model_name=hp.model_name,
+                                              train_config=train_config,
                                               iterations=hp.iterations,
-                                              budget_per_iter=hp.budget_per_iter
+                                              budget_per_iter=hp.budget_per_iter,
+                                              test_ratio=hp.test_ratio
                                               )
             
             accuracy_scores_dict[criterion] = AL_class.run_pipeline()
