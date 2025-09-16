@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from torch_geometric.nn import SAGEConv
 import torch
 import torch_geometric
@@ -25,7 +26,7 @@ class GraphSAGE(torch.nn.Module):
     
 
 # CNN model (for CIFAR10)
-class ResNet18Simple(nn.Module):
+class ResNet18(nn.Module):
     def __init__(self, num_classes=10):
             super().__init__()
             # load resnet18 without pretrained weights
@@ -54,14 +55,30 @@ class ResNet18Simple(nn.Module):
 
 
 
-
-
 # loading model function
-def load_model_wrapper(model_name):
-    # example usage
-    if model_name == 'ResNet140':
-        pass
+def load_model_wrapper(model_name, n_classes):
+    factory = {
+        "resnet18": ResNet18(n_classes),
+        "gcn": GraphSAGE(n_classes)
+        # add every model that gets added here
+    }
+    if model_name not in factory:
+        raise ValueError(f"Unknown model {model_name}")
+    return factory[model_name]
 
 # training model function
 def train_model_wrapper(X_train, y_train, model):
     pass
+
+
+class TrainConfig:
+    def __init__(self, epochs, lr, weight_decay, momentum, batch_size, ckpt_dir, log_every):
+       self.epochs = epochs 
+       self.lr = lr
+       self.weight_decay = weight_decay
+       self.momentum = momentum
+       self.batch_size = batch_size
+       self.ckpt_dir = ckpt_dir
+       self.log_every = log_every
+    def __repr__(self):
+        print(f"Train Config: epochs={self.epochs}, lr={self.lr}, bs={self.batch_size}, log every {self.log_every}")

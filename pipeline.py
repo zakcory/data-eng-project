@@ -135,6 +135,12 @@ if __name__ == '__main__':
     parser.add_argument('--indices_dict_path', type=str, default='indices_dict_part1.pkl')
     parser.add_argument('--iterations', type=int, default=20)
     parser.add_argument('--budget_per_iter', type=int, default=30)
+    parser.add_argument("--epochs", type=int, default=100)
+    parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--weight_decay", type=float, default=5e-4)
+    parser.add_argument("--momentum", type=float, default=0.9)
+    parser.add_argument("--batch_size", type=int, default=128)
+    parser.add_argument("--ckpt_dir", type=str, default="./ckpts")
 
     # model and dataset name
     parser.add_argument('--model_name', type=str, required=True)
