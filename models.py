@@ -36,6 +36,7 @@ def train_gnn_model(model, data, cfg):
     loss_steps = list()
     best_val_acc = 0
     best_loss = np.inf
+
     for epoch in range(1, cfg.epochs+1):
 
         model.train()
@@ -90,8 +91,46 @@ class ResNet18(nn.Module):
         if return_embedding:
             return x
         return self.fc(x)
+    
+def train_deep_model(model, x_train, y_train, x_val, y_val, cfg):
 
+    optimizer = torch.optim.Adam(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
+    criterion = torch.nn.CrossEntropyLoss()
 
+    loss_steps = list()
+    best_val_acc = 0
+    best_loss = np.inf
+
+    n_batches = int(np.ceil(len(x_train) / cfg.batch_size)) 
+    for epoch in range(1, cfg.epochs + 1):
+        model.train()
+        for batch_idx in range(n_batches):
+                start_idx = batch_idx * cfg.batch_size
+                end_idx = min((batch_idx + 1) * cfg.batch_size, len(x_train))
+
+                x = x_train[start_idx:end_idx, :].detach().clone().to(cfg.device)
+                y = y_train[start_idx:end_idx].detach().clone().to(cfg.device)
+                output = model.forward(x)    # scores 
+
+                optimizer.zero_grad()
+                loss = criterion(output, y)        
+                loss.backward()
+                optimizer.step()
+
+        val_acc = validate(model, x_val, y_val, cfg.batch_size, cfg.device)
+        if val_acc > best_val_acc:
+            best_val_acc = val_acc
+            best_loss = loss.item()
+            torch.save({'model_state': model.state_dict(), 'optim_state': optimizer.state_dict()}, f"cfg.ckpt_dir")
+    
+        if epoch % cfg.log_every == 0 or epoch == 1:
+            print(f"Epoch: {epoch:03d}  "
+                  f"Best Val Acc: {best_val_acc:.4f}  "
+                  f"Best Loss: {best_loss:.4f}  "
+            )
+        loss_steps.append(loss.item())
+
+    return loss_steps, model
 
 
 # loading model function
@@ -105,13 +144,9 @@ def load_model_wrapper(model_name, n_classes):
         raise ValueError(f"Unknown model {model_name}")
     return factory[model_name]
 
-# training model function
-def train_model_wrapper(X_train, y_train, model):
-    pass
-
 
 class TrainConfig:
-    def __init__(self, epochs, lr, weight_decay, momentum, optimizer, batch_size, ckpt_dir, log_every):
+    def __init__(self, epochs, lr, weight_decay, momentum, batch_size, ckpt_dir, log_every, device):
        self.epochs = epochs 
        self.lr = lr
        self.weight_decay = weight_decay
@@ -119,6 +154,7 @@ class TrainConfig:
        self.batch_size = batch_size
        self.ckpt_dir = ckpt_dir
        self.log_every = log_every
+       self.device = device
     def __repr__(self):
         print(f"Train Config: epochs={self.epochs}, lr={self.lr}, bs={self.batch_size}, log every {self.log_every}")
 
@@ -131,3 +167,18 @@ def accuracy(logits, y):
     pred = logits.argmax(dim=11)
     y = y.view(-1)
     return (pred == y).float().mean().item()
+
+@torch.no_grad()
+def validate(model, x_val, y_val, bs, device):
+    model.eval()
+    correct, total = 0, 0
+    n_batches = int(np.ceil(len(x_val) / bs)) 
+    for batch_idx in range(n_batches):
+        start_idx = batch_idx * bs
+        end_idx = min((batch_idx + 1) * bs, len(x_val))
+        x = x_val[start_idx:end_idx, :].detach().clone().to(device)
+        y = y_val[start_idx:end_idx].detach().clone().to(device)
+        logits = model(x)
+        correct += (logits.argmax(1) == y).sum().item()
+        total += y.numel()
+    return correct / total

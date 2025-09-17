@@ -17,19 +17,21 @@ class ActiveLearningPipeline:
                  train_config,
                  iterations=20,
                  budget_per_iter=0.01,
-                 test_ratio = 0.2
+                 test_ratio=0.2,
+                 val_ratio=0.05
                  ):
         self.seed = seed
         self.feature_vectors = feature_vectors
         self.labels = labels
         self.iterations = iterations
         self.budget_per_iter = budget_per_iter
-        self.train_indices, self.test_indices, self.available_pool_indices = self._split_points
+        self.train_indices, self.val_indices, self.test_indices, self.available_pool_indices = self._split_points
         self.train_config = train_config
         self.selection_criterion = selection_criterion
         self.dataset_name = dataset_name
         self.model_name = model_name
         self.test_ratio = test_ratio
+        self.val_ratio = val_ratio
 
     def run_pipeline(self):
         """
@@ -41,7 +43,7 @@ class ActiveLearningPipeline:
                 # raise error if the train set is larger than 600 samples
                 raise ValueError('The train set is larger than 600 samples')
             print(f'Iteration {iteration + 1}/{self.iterations}')
-            trained_model = self._train_model()
+            loss_steps, trained_model = self._train_model()
             accuracy = self._evaluate_model(trained_model)
             accuracy_scores.append(accuracy)
             print(f'Accuracy: {accuracy}')
@@ -50,27 +52,37 @@ class ActiveLearningPipeline:
         return accuracy_scores
     
     def _split_points(self):
-        # pick test indices
         total_size = len(self.labels)
-        total_indices = list(range(total_size))
-        test_indices = np.random.choice(total_indices, size=self.test_ratio, replace=False)
+        all_idx = np.arange(total_size)
 
-        # adjust ratio and pick init train indices
-        left_indices = set(total_indices) - set(test_indices)
-        init_train_adj_ratio = self.budget_per_iter / self.test_ratio
-        init_train_indices = np.random.choice(left_indices, size=init_train_adj_ratio, replace=False)
+        rng = np.random.default_rng(self.seed)
 
-        # pool indices are whats left
-        available_pool_indices = list(set(test_indices) - set(init_train_indices))
+        train_n = int(round(self.budget_per_iter * total_size))
+        val_n = int(round(self.val_ratio * total_size))
+        test_n = int(round(self.test_ratio * total_size))
 
-        return init_train_indices, test_indices, available_pool_indices
+        # splitting point for train / test / val / pool
+        test_idx = rng.choice(all_idx, size=test_n, replace=False)
+        rem = np.setdiff1d(all_idx, test_idx, assume_unique=False)
+
+        val_idx = rng.choice(rem, size=val_n, replace=False)
+        rem = np.setdiff1d(rem, val_idx, assume_unique=False)
+
+        train_idx = rng.choice(rem, size=train_n, replace=False)
+        pool_idx  = np.setdiff1d(rem, train_idx, assume_unique=False)
+
+        return train_idx.tolist(), val_idx.tolist(), test_idx.tolist(), pool_idx.tolist()
 
     def _train_model(self):
         """
         Train the model
         """
-        model = load_model_wrapper('CNN')
-        return train_model_wrapper(self.feature_vectors[train_indices], self.labels[train_indices], model, self.train_config)
+        model = load_model_wrapper('resnet18')
+        return train_deep_model(self.feature_vectors[self.train_indices],
+                                    self.labels[self.train_indices],
+                                    self.feature_vectors[self.val_indices],
+                                    self.labels[self.val_indices],
+                                    model, self.train_config)
 
     def _random_sampling(self):
         """
@@ -139,12 +151,12 @@ class ActiveLearningPipeline:
         :param trained_model: trained model
         :return: accuracy: float, accuracy of the model on the test set
         """
-        test_indices = [self.node_id_mapping[node_id] for node_id in self.test_indices]
-        train_indices = [self.node_id_mapping[node_id] for node_id in self.train_indices]
-        if any(idx in train_indices for idx in test_indices):
+        if any(idx in self.train_indices for idx in self.test_indices):
             raise ValueError('Data leakage detected: test indices are in the train set.')
-        preds = trained_model.predict(self.feature_vectors[test_indices])
-        return round(np.mean(preds == self.labels[test_indices]), 3)
+        
+        test_acc = validate(trained_model, self.feature_vectors[test_indices], self.labels[self.test_indices],
+                         self.train_config.batch_size, self.train_config.device)
+        return test_acc
 
 
 
@@ -155,6 +167,7 @@ if __name__ == '__main__':
     parser.add_argument('--iterations', type=int, default=20)
     parser.add_argument('--budget_per_iter_ratio', type=float, default=0.01)
     parser.add_argument("--test_ratio", type=float, default=0.2)
+    parser.add_argument("--val_ratio", type=float, default=0.05)
     # training model configs
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--lr", type=float, default=1e-3)
@@ -165,7 +178,9 @@ if __name__ == '__main__':
     parser.add_argument("--log_every", type=int, default=10)
     # model and dataset name
     parser.add_argument('--model_name', type=str, required=True)
-    parser.add_argument('--dataset_name', type=str, required=True)    
+    parser.add_argument('--dataset_name', type=str, required=True)  
+    # device
+    parser.add_argument("--device", type=str, default='cuda')  
 
     hp = parser.parse_args()
     with open(hp.indices_dict_path, 'rb') as f:
@@ -175,7 +190,7 @@ if __name__ == '__main__':
     test_indices = indices_dict['test_indices']
 
     # add training config into a configurator
-    train_config = TrainConfig(hp.epochs, hp.lr, hp.weight_decay, hp.momentum, hp.batch_size, hp.ckpt_dir, hp.log_every) 
+    train_config = TrainConfig(hp.epochs, hp.lr, hp.weight_decay, hp.momentum, hp.batch_size, hp.ckpt_dir, hp.log_every, hp.device) 
 
     # TODO: add more criterias here
     selection_criteria = ['custom', 'random']
@@ -196,7 +211,8 @@ if __name__ == '__main__':
                                               train_config=train_config,
                                               iterations=hp.iterations,
                                               budget_per_iter=hp.budget_per_iter,
-                                              test_ratio=hp.test_ratio
+                                              test_ratio=hp.test_ratio,
+                                              val_ratio=hp.val_ratio
                                               )
             
             accuracy_scores_dict[criterion] = AL_class.run_pipeline()
