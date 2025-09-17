@@ -8,8 +8,7 @@ from torch.utils.data import DataLoader
 from torchvision import datasets, transforms, models
 
 # CIFAR10 loader
-def get_cifar10_loaders(
-    data_dir="./data/cifar10", batch_size: int = 256, num_workers: int = 2):
+def get_cifar10_data(data_dir="./data/cifar10"):
 
     train_tf = transforms.Compose([
         transforms.RandomCrop(32, padding=4),
@@ -22,11 +21,22 @@ def get_cifar10_loaders(
     train_set = datasets.CIFAR10(root=data_dir, train=True, download=True, transform=train_tf)
     test_set = datasets.CIFAR10(root=data_dir, train=False, download=True, transform=test_tf)
 
-    train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True,
-                              num_workers=num_workers, pin_memory=True)
-    test_loader = DataLoader(test_set, batch_size=batch_size, shuffle=False,
-                             num_workers=num_workers, pin_memory=True)
-    return train_loader, test_loader
+    # we need the entire dataset for tensor indexing later on 
+    X_train = torch.from_numpy(train_set.data)
+    X = torch.cat([X_train, torch.from_numpy(test_set.data)], dim=0)  
+    y = torch.tensor(train_set.targets + test_set.targets, dtype=torch.long)
 
-if __name__ == '__main__':
-    get_cifar10_loaders()
+    # normalizing the tensor
+    X = X.permute(0, 3, 1, 2).float().div_(255.0)
+    mean = X.mean(dim=(0, 2, 3), keepdim=True)              
+    std  = X.std(dim=(0, 2, 3), keepdim=True)  
+    print(mean, std)
+    X = (X - mean) / std
+
+    return X, y
+
+def get_credit_data(data_dir):
+    pass
+
+def get_imdb_data(data_dir):
+    pass

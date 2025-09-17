@@ -1,10 +1,11 @@
 import pandas as pd
 import numpy as np
-import pickle
 from collections import defaultdict
 import argparse
+
 from utils import *
 from models import *
+from factories import *
 
 
 class ActiveLearningPipeline:
@@ -32,6 +33,7 @@ class ActiveLearningPipeline:
         self.model_name = model_name
         self.test_ratio = test_ratio
         self.val_ratio = val_ratio
+        self.n_classes
 
     def run_pipeline(self):
         """
@@ -176,21 +178,19 @@ if __name__ == '__main__':
     parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument("--ckpt_dir", type=str, default="./ckpts")
     parser.add_argument("--log_every", type=int, default=10)
-    # model and dataset name
+    # model and dataset name and path
     parser.add_argument('--model_name', type=str, required=True)
     parser.add_argument('--dataset_name', type=str, required=True)  
     # device
     parser.add_argument("--device", type=str, default='cuda')  
 
     hp = parser.parse_args()
-    with open(hp.indices_dict_path, 'rb') as f:
-        indices_dict = pickle.load(f)
-    available_pool_indices = indices_dict['available_pool_indices']
-    train_indices = indices_dict['train_indices']
-    test_indices = indices_dict['test_indices']
 
     # add training config into a configurator
     train_config = TrainConfig(hp.epochs, hp.lr, hp.weight_decay, hp.momentum, hp.batch_size, hp.ckpt_dir, hp.log_every, hp.device) 
+
+    # X, y (entire set)
+    x, y = load_dataset_wrapper(hp.dataset_name)
 
     # TODO: add more criterias here
     selection_criteria = ['custom', 'random']
@@ -202,9 +202,8 @@ if __name__ == '__main__':
         print(f"seed {seed}")
         for criterion in selection_criteria:
             AL_class = ActiveLearningPipeline(seed=seed,
-                                              test_indices=test_indices,
-                                              available_pool_indices=available_pool_indices,
-                                              train_indices=train_indices,
+                                              feature_vectors=x,
+                                              labels=y,
                                               selection_criterion=criterion,
                                               dataset_name=hp.dataset_name,
                                               model_name=hp.model_name,

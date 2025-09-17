@@ -46,6 +46,7 @@ def train_gnn_model(model, data, cfg):
         loss.backward()
         optimizer.step()
 
+        model.eval()
         with torch.no_grad():
             logits = model(data.x, data.edge_index)
         val_acc = accuracy(logits[data.valid_mask], data.y[data.valid_mask])
@@ -131,18 +132,6 @@ def train_deep_model(model, x_train, y_train, x_val, y_val, cfg):
         loss_steps.append(loss.item())
 
     return loss_steps, model
-
-
-# loading model function
-def load_model_wrapper(model_name, n_classes):
-    factory = {
-        "resnet18": ResNet18(n_classes),
-        "gcn": GraphSAGE(n_classes)
-        # add every model that gets added here
-    }
-    if model_name not in factory:
-        raise ValueError(f"Unknown model {model_name}")
-    return factory[model_name]
 
 
 class TrainConfig:
