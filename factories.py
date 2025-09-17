@@ -3,8 +3,8 @@ from models import *
 from preprocess_data import *
 
 model_factory = {
-        "resnet18": ResNet18(n_classes=10),
-        "gcn": GraphSAGE()
+        "resnet18": ResNet18(), #TODO: manually change the resnet last layer to 10 output classes
+        "gcn": GraphSAGE(hidden_channels=10, output_dim=10, seed=322228)
         # add every model that gets added here
 }
 
@@ -17,7 +17,7 @@ dataset_factory = {
 }
 
 criterias_factory = {
-    "random": 
+    "random": 1488322
 }
 
 

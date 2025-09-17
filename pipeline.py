@@ -19,21 +19,23 @@ class ActiveLearningPipeline:
                  iterations=20,
                  budget_per_iter=0.01,
                  test_ratio=0.2,
-                 val_ratio=0.05
+                 val_ratio=0.05,
+                 n_classes=10
                  ):
         self.seed = seed
         self.feature_vectors = feature_vectors
         self.labels = labels
         self.iterations = iterations
         self.budget_per_iter = budget_per_iter
-        self.train_indices, self.val_indices, self.test_indices, self.available_pool_indices = self._split_points
         self.train_config = train_config
         self.selection_criterion = selection_criterion
         self.dataset_name = dataset_name
         self.model_name = model_name
         self.test_ratio = test_ratio
         self.val_ratio = val_ratio
-        self.n_classes
+        self.n_classes = n_classes
+        self.train_indices, self.val_indices, self.test_indices, self.available_pool_indices = self._split_points()
+
 
     def run_pipeline(self):
         """
@@ -79,12 +81,14 @@ class ActiveLearningPipeline:
         """
         Train the model
         """
-        model = load_model_wrapper('resnet18')
-        return train_deep_model(self.feature_vectors[self.train_indices],
+        model = load_model_wrapper('resnet18', n_classes=self.n_classes)
+        # Corrected argument order:
+        return train_deep_model(model,
+                                    self.feature_vectors[self.train_indices],
                                     self.labels[self.train_indices],
                                     self.feature_vectors[self.val_indices],
                                     self.labels[self.val_indices],
-                                    model, self.train_config)
+                                    self.train_config)
 
     def _random_sampling(self):
         """
@@ -179,8 +183,8 @@ if __name__ == '__main__':
     parser.add_argument("--ckpt_dir", type=str, default="./ckpts")
     parser.add_argument("--log_every", type=int, default=10)
     # model and dataset name and path
-    parser.add_argument('--model_name', type=str, required=True)
-    parser.add_argument('--dataset_name', type=str, required=True)  
+    parser.add_argument('--model_name', type=str, default="resnet18")
+    parser.add_argument('--dataset_name', type=str, default="cifar10")
     # device
     parser.add_argument("--device", type=str, default='cuda')  
 
@@ -209,7 +213,7 @@ if __name__ == '__main__':
                                               model_name=hp.model_name,
                                               train_config=train_config,
                                               iterations=hp.iterations,
-                                              budget_per_iter=hp.budget_per_iter,
+                                              budget_per_iter=hp.budget_per_iter_ratio,
                                               test_ratio=hp.test_ratio,
                                               val_ratio=hp.val_ratio
                                               )

@@ -1,7 +1,7 @@
 from dataclasses import dataclass
+import torch_geometric
 from torch_geometric.nn import SAGEConv
 import torch
-import torch_geometric
 import torch.nn.functional as F
 import torch.nn as nn
 from torchvision import models
@@ -94,9 +94,11 @@ class ResNet18(nn.Module):
         return self.fc(x)
     
 def train_deep_model(model, x_train, y_train, x_val, y_val, cfg):
+    model.cuda()
 
     optimizer = torch.optim.Adam(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
     criterion = torch.nn.CrossEntropyLoss()
+
 
     loss_steps = list()
     best_val_acc = 0
