@@ -37,6 +37,9 @@ class ActiveLearningPipeline:
         self.train_indices, self.val_indices, self.test_indices, self.available_pool_indices = self._split_points()
 
 
+    def _update_params(self, trained_model):
+        pass
+
     def run_pipeline(self):
         """
         Run the active learning pipeline
@@ -81,7 +84,7 @@ class ActiveLearningPipeline:
         """
         Train the model
         """
-        model = load_model_wrapper('resnet18', n_classes=self.n_classes)
+        model = load_model_wrapper(self.model_name, n_classes=self.n_classes)
         # Corrected argument order:
         return train_deep_model(model,
                                     self.feature_vectors[self.train_indices],
@@ -160,7 +163,7 @@ class ActiveLearningPipeline:
         if any(idx in self.train_indices for idx in self.test_indices):
             raise ValueError('Data leakage detected: test indices are in the train set.')
         
-        test_acc = validate(trained_model, self.feature_vectors[test_indices], self.labels[self.test_indices],
+        test_acc = validate(trained_model, self.feature_vectors[self.test_indices], self.labels[self.test_indices],
                          self.train_config.batch_size, self.train_config.device)
         return test_acc
 
@@ -183,8 +186,8 @@ if __name__ == '__main__':
     parser.add_argument("--ckpt_dir", type=str, default="./ckpts")
     parser.add_argument("--log_every", type=int, default=10)
     # model and dataset name and path
-    parser.add_argument('--model_name', type=str, default="resnet18")
-    parser.add_argument('--dataset_name', type=str, default="cifar10")
+    parser.add_argument('--model_name', type=str, default="fraudnet")
+    parser.add_argument('--dataset_name', type=str, default="credit-cards")
     # device
     parser.add_argument("--device", type=str, default='cuda')  
 

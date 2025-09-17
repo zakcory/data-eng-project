@@ -4,8 +4,11 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms, models
+import pandas as pd
 
 # CIFAR10 loader
 def get_cifar10_data(data_dir="./data/cifar10"):
@@ -35,8 +38,27 @@ def get_cifar10_data(data_dir="./data/cifar10"):
 
     return X, y
 
-def get_credit_data(data_dir):
-    pass
+
+def get_credit_data(data_dir="./data/creditcard/creditcard.csv"):
+
+    df = pd.read_csv("./data/creditcard/creditcard.csv")[:599]
+
+    # 1. Extract all features and labels
+    X = df.iloc[:, :-1].values
+    y = df.iloc[:, -1].values
+
+    # 2. Scale the features
+    sc = StandardScaler()
+    X = sc.fit_transform(X)
+
+    # 3. Convert NumPy arrays to PyTorch Tensors
+    #    Use .float() for features and .long() for classification labels.
+    X_tensor = torch.from_numpy(X)
+    y_tensor = torch.from_numpy(y)
+
+    # 4. Return the entire dataset, not a pre-split portion
+    return X_tensor, y_tensor
+
 
 def get_imdb_data(data_dir):
     pass

@@ -4,13 +4,14 @@ from preprocess_data import *
 
 model_factory = {
         "resnet18": ResNet18(), #TODO: manually change the resnet last layer to 10 output classes
-        "gcn": GraphSAGE(hidden_channels=10, output_dim=10, seed=322228)
+        "gcn": GraphSAGE(hidden_channels=10, output_dim=10, seed=322228),
+        "fraudnet": CreditCardFraudNet().double()
         # add every model that gets added here
 }
 
 dataset_factory = {
     "cifar10": get_cifar10_data("./data/cifar10"),
-    "credit-cards": get_credit_data("./data/credircard.csv"),
+    "credit-cards": get_credit_data("./data/credircard"),
     "IMDB": get_imdb_data("./data/IMDB.csv")
     # add every path to the dataset that gets added here
 
