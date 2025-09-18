@@ -12,6 +12,62 @@ import torch.optim
 
 # TODO: ADD MODELS HERE
 
+class SentimentLSTM(nn.Module):
+    """
+    The RNN model that will be used to perform Sentiment analysis.
+    """
+
+    def __init__(self, vocab_size, output_size, embedding_dim, hidden_dim, n_layers, drop_prob=0.5):
+        super(SentimentLSTM, self).__init__()
+
+        self.output_size = output_size
+        self.n_layers = n_layers
+        self.hidden_dim = hidden_dim
+
+        self.embedding = nn.Embedding(vocab_size, embedding_dim)
+        self.lstm = nn.LSTM(embedding_dim, hidden_dim, n_layers,
+                            dropout=drop_prob, batch_first=True)
+
+        self.dropout = nn.Dropout(0.3)
+        self.fc = nn.Linear(hidden_dim, output_size)
+        self.sig = nn.Sigmoid()
+
+    def forward(self, x, hidden):
+        batch_size = x.size(0)
+
+        embeds = self.embedding(x)
+        lstm_out, hidden = self.lstm(embeds, hidden)
+
+        # Stack up lstm outputs
+        lstm_out = lstm_out.contiguous().view(-1, self.hidden_dim)
+
+        out = self.dropout(lstm_out)
+        out = self.fc(out)
+        sig_out = self.sig(out)
+
+        # Reshape to be batch_size first
+        sig_out = sig_out.view(batch_size, -1)
+        sig_out = sig_out[:, -1]  # Get last batch of labels
+
+        # Return last sigmoid output and hidden state
+        return sig_out, hidden
+
+    def init_hidden(self, batch_size):
+        # Create two new tensors with sizes n_layers x batch_size x hidden_dim,
+        # initialized to zero, for hidden state and cell state of LSTM
+        weight = next(self.parameters()).data
+
+        # Check for CUDA
+        is_cuda = weight.is_cuda
+        if (is_cuda):
+            hidden = (weight.new(self.n_layers, batch_size, self.hidden_dim).zero_().cuda(),
+                      weight.new(self.n_layers, batch_size, self.hidden_dim).zero_().cuda())
+        else:
+            hidden = (weight.new(self.n_layers, batch_size, self.hidden_dim).zero_(),
+                      weight.new(self.n_layers, batch_size, self.hidden_dim).zero_())
+
+        return hidden
+
 
 # GNN model (for active learning)
 class GraphSAGE(torch.nn.Module):
@@ -114,7 +170,10 @@ def train_deep_model(model, x_train, y_train, x_val, y_val, cfg):
 
     optimizer = torch.optim.Adam(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
     criterion = torch.nn.CrossEntropyLoss()
-
+    if isinstance(model, SentimentLSTM):
+        criterion = nn.BCELoss()
+    else:
+        criterion = nn.CrossEntropyLoss()
 
     loss_steps = list()
     best_val_acc = 0
@@ -122,6 +181,8 @@ def train_deep_model(model, x_train, y_train, x_val, y_val, cfg):
 
     n_batches = int(np.ceil(len(x_train) / cfg.batch_size)) 
     for epoch in range(1, cfg.epochs + 1):
+        if isinstance(model, SentimentLSTM):
+            h = model.init_hidden(cfg.batch_size)
         model.train()
         for batch_idx in range(n_batches):
                 start_idx = batch_idx * cfg.batch_size
@@ -129,11 +190,26 @@ def train_deep_model(model, x_train, y_train, x_val, y_val, cfg):
 
                 x = x_train[start_idx:end_idx, :].detach().clone().to(cfg.device)
                 y = y_train[start_idx:end_idx].detach().clone().to(cfg.device)
-                output = model.forward(x)    # scores 
+                if isinstance(model, SentimentLSTM):
+                    current_batch_size = x.size(0)
+                    if h[0].size(1) != current_batch_size:
+                        h = model.init_hidden(current_batch_size)
+
+                    # Detach hidden state to prevent backprop through history
+                    h = tuple([each.data for each in h])
+
+                    # Labels for BCELoss must be float
+                    y = y.float()
+                    output, h = model(x, h)
+                else:
+                    output = model(x)   # scores
 
                 optimizer.zero_grad()
                 loss = criterion(output, y)        
                 loss.backward()
+
+                if isinstance(model, SentimentLSTM):
+                    nn.utils.clip_grad_norm_(model.parameters(), 5)
                 optimizer.step()
 
         val_acc = validate(model, x_val, y_val, cfg.batch_size, cfg.device)
@@ -171,21 +247,45 @@ class TrainConfig:
 
 @torch.no_grad()
 def accuracy(logits, y):
-    pred = logits.argmax(dim=11)
+    pred = logits.argmax(dim=1)
     y = y.view(-1)
     return (pred == y).float().mean().item()
+
 
 @torch.no_grad()
 def validate(model, x_val, y_val, bs, device):
     model.eval()
     correct, total = 0, 0
-    n_batches = int(np.ceil(len(x_val) / bs)) 
+    n_batches = int(np.ceil(len(x_val) / bs))
+
+    # Initialize hidden state for LSTM at the start
+    if isinstance(model, SentimentLSTM):
+        h = model.init_hidden(bs)
+
     for batch_idx in range(n_batches):
         start_idx = batch_idx * bs
         end_idx = min((batch_idx + 1) * bs, len(x_val))
+
         x = x_val[start_idx:end_idx, :].detach().clone().to(device)
         y = y_val[start_idx:end_idx].detach().clone().to(device)
-        logits = model(x)
-        correct += (logits.argmax(1) == y).sum().item()
+
+        #LSTM LOGIC
+        if isinstance(model, SentimentLSTM):
+            current_batch_size = x.size(0)
+            # If the last batch is smaller  recreate the hidden state
+            if h[0].size(1) != current_batch_size:
+                h = model.init_hidden(current_batch_size)
+
+            h = tuple([each.data for each in h])
+            output, h = model(x, h)  # Call model with both x and h
+
+            # For sigmoid output, round to get 0 or 1 predictions
+            pred = torch.round(output.squeeze())
+            correct += (pred == y.float()).sum().item()
+        else:
+            logits = model(x)
+            correct += (logits.argmax(1) == y).sum().item()
+
         total += y.numel()
+
     return correct / total

@@ -20,7 +20,8 @@ class ActiveLearningPipeline:
                  budget_per_iter=0.01,
                  test_ratio=0.2,
                  val_ratio=0.05,
-                 n_classes=10
+                 n_classes=10,
+                 model_config=None
                  ):
         self.seed = seed
         self.feature_vectors = feature_vectors
@@ -34,6 +35,7 @@ class ActiveLearningPipeline:
         self.test_ratio = test_ratio
         self.val_ratio = val_ratio
         self.n_classes = n_classes
+        self.model_config = model_config
         self.train_indices, self.val_indices, self.test_indices, self.available_pool_indices = self._split_points()
 
 
@@ -87,7 +89,8 @@ class ActiveLearningPipeline:
         input_dim = self.feature_vectors.shape[1]
         model = load_model_wrapper(self.model_name,
                                    n_classes=self.n_classes,
-                                   input_dim=input_dim)  # Pass the input dimension
+                                   input_dim=input_dim,
+                                   model_config=self.model_config)
 
         return train_deep_model(model,
                                     self.feature_vectors[self.train_indices],
@@ -189,8 +192,12 @@ if __name__ == '__main__':
     parser.add_argument("--ckpt_dir", type=str, default="./ckpts")
     parser.add_argument("--log_every", type=int, default=10)
     # model and dataset name and path
-    parser.add_argument('--model_name', type=str, default="glassnet")
-    parser.add_argument('--dataset_name', type=str, default="glass")
+    parser.add_argument('--model_name', type=str, default="lstm")
+    parser.add_argument('--dataset_name', type=str, default="IMDB")
+
+    parser.add_argument("--embedding_dim", type=int, default=128, help="Dimension for word embeddings")
+    parser.add_argument("--hidden_dim", type=int, default=256, help="Dimension for LSTM hidden state")
+    parser.add_argument("--n_layers", type=int, default=2, help="Number of LSTM layers")
 
     #added n_classes to configurables
     parser.add_argument("--n_classes", type=int, default=10)
@@ -204,13 +211,27 @@ if __name__ == '__main__':
     train_config = TrainConfig(hp.epochs, hp.lr, hp.weight_decay, hp.momentum, hp.batch_size, hp.ckpt_dir, hp.log_every, hp.device) 
 
     # X, y (entire set)
-    x, y = load_dataset_wrapper(hp.dataset_name)
+    x, y, data_meta = load_dataset_wrapper(hp.dataset_name)
+
 
     # TODO: add more criterias here
     selection_criteria = ['custom', 'random']
     accuracy_scores_dict = defaultdict(list)
 
+    model_config = None
+    if hp.model_name == 'lstm':
+        model_config = {
+            'vocab_size': data_meta['vocab_size'],
+            'output_size': 1,  # Single output for sigmoid
+            'embedding_dim': hp.embedding_dim,
+            'hidden_dim': hp.hidden_dim,
+            'n_layers': hp.n_layers
+        }
+
+
+
     print(f"\n-----------STARTING ACTIVE LEARNING PIPELINE FOR DATASET {hp.dataset_name} WITH MODEL {hp.model_name}-------------------\n")
+
 
     for i, seed in enumerate(range(1, 4)):
         print(f"seed {seed}")
@@ -226,7 +247,8 @@ if __name__ == '__main__':
                                               budget_per_iter=hp.budget_per_iter_ratio,
                                               test_ratio=hp.test_ratio,
                                               val_ratio=hp.val_ratio,
-                                              n_classes=hp.n_classes
+                                              n_classes=hp.n_classes,
+                                              model_config=model_config
                                               )
             
             accuracy_scores_dict[criterion] = AL_class.run_pipeline()
