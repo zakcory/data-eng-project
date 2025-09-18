@@ -84,8 +84,11 @@ class ActiveLearningPipeline:
         """
         Train the model
         """
-        model = load_model_wrapper(self.model_name, n_classes=self.n_classes)
-        # Corrected argument order:
+        input_dim = self.feature_vectors.shape[1]
+        model = load_model_wrapper(self.model_name,
+                                   n_classes=self.n_classes,
+                                   input_dim=input_dim)  # Pass the input dimension
+
         return train_deep_model(model,
                                     self.feature_vectors[self.train_indices],
                                     self.labels[self.train_indices],
@@ -186,9 +189,13 @@ if __name__ == '__main__':
     parser.add_argument("--ckpt_dir", type=str, default="./ckpts")
     parser.add_argument("--log_every", type=int, default=10)
     # model and dataset name and path
-    parser.add_argument('--model_name', type=str, default="fraudnet")
-    parser.add_argument('--dataset_name', type=str, default="credit-cards")
+    parser.add_argument('--model_name', type=str, default="glassnet")
+    parser.add_argument('--dataset_name', type=str, default="glass")
+
+    #added n_classes to configurables
+    parser.add_argument("--n_classes", type=int, default=10)
     # device
+
     parser.add_argument("--device", type=str, default='cuda')  
 
     hp = parser.parse_args()
@@ -218,7 +225,8 @@ if __name__ == '__main__':
                                               iterations=hp.iterations,
                                               budget_per_iter=hp.budget_per_iter_ratio,
                                               test_ratio=hp.test_ratio,
-                                              val_ratio=hp.val_ratio
+                                              val_ratio=hp.val_ratio,
+                                              n_classes=hp.n_classes
                                               )
             
             accuracy_scores_dict[criterion] = AL_class.run_pipeline()

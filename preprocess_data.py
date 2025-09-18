@@ -5,7 +5,8 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, LabelEncoder
+from thinc.util import to_categorical
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms, models
 import pandas as pd
@@ -39,26 +40,28 @@ def get_cifar10_data(data_dir="./data/cifar10"):
     return X, y
 
 
-def get_credit_data(data_dir="./data/creditcard/creditcard.csv"):
+def get_glass_data(data_dir="./data/glass/glass.csv"):
+    """
+    Loads and preprocesses the entire glass dataset.
+    """
+    df = pd.read_csv(data_dir)
 
-    df = pd.read_csv("./data/creditcard/creditcard.csv")[:599]
-
-    # 1. Extract all features and labels
-    X = df.iloc[:, :-1].values
-    y = df.iloc[:, -1].values
+    # 1. Separate features (X) and the target label (y)
+    X = df.drop('Type', axis=1).values
+    y = df['Type'].values
 
     # 2. Scale the features
-    sc = StandardScaler()
-    X = sc.fit_transform(X)
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
 
-    # 3. Convert NumPy arrays to PyTorch Tensors
-    #    Use .float() for features and .long() for classification labels.
-    X_tensor = torch.from_numpy(X)
-    y_tensor = torch.from_numpy(y)
 
-    # 4. Return the entire dataset, not a pre-split portion
+    encoder = LabelEncoder()
+    y_encoded = encoder.fit_transform(y)
+
+    X_tensor = torch.from_numpy(X_scaled).float()
+    y_tensor = torch.from_numpy(y_encoded).long()
+
     return X_tensor, y_tensor
-
 
 def get_imdb_data(data_dir):
     pass

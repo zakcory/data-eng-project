@@ -93,21 +93,20 @@ class ResNet18(nn.Module):
             return x
         return self.fc(x)
 
-class CreditCardFraudNet(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.fc1 = nn.Linear(30, 16)
-        self.fc2 = nn.Linear(16, 18)
-        self.fc3 = nn.Linear(18, 20)
-        self.fc4 = nn.Linear(20, 24)
-        self.fc5 = nn.Linear(24, 1)
+class GlassNet(nn.Module):
+    def __init__(self, input_dim, num_classes):
+        super(GlassNet, self).__init__()
+        self.fc1 = nn.Linear(input_dim, 64)
+        self.fc2 = nn.Linear(64, 64)
+        self.fc3 = nn.Linear(64, 64)
+        self.fc4 = nn.Linear(64, 64)
+        self.fc5 = nn.Linear(64, num_classes)
     def forward(self, x):
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
-        x = F.dropout(x, p=0.25)
-        x = F.relu(self.fc3(x))
-        x = F.relu(self.fc4(x))
-        x = F.sigmoid(self.fc5(x))
+        x = torch.relu(self.fc1(x))
+        x = torch.relu(self.fc2(x))
+        x = torch.relu(self.fc3(x))
+        x = torch.relu(self.fc4(x))
+        x = torch.softmax(self.fc5(x), dim=1)
         return x
 
 def train_deep_model(model, x_train, y_train, x_val, y_val, cfg):
