@@ -1,5 +1,7 @@
 import pandas as pd
 import numpy as np
+import torch
+from torch_geometric.data import Data
 from collections import defaultdict
 import argparse
 
@@ -172,6 +174,41 @@ class ActiveLearningPipeline:
         test_acc = validate(trained_model, self.feature_vectors[self.test_indices], self.labels[self.test_indices],
                          self.train_config.batch_size, self.train_config.device)
         return test_acc
+    
+    def _build_graph_from_embeddings(self, embeddings: torch.Tensor, k: int = 10, symmetrize: bool = True):
+        """
+        Build a k-NN graph (edge_index) from dense embeddings and
+        optionally return a fully prepared PyG Data object with masks.
+
+        Args:
+            embeddings: torch.Tensor [N, D] on CPU (or GPU, but CPU is safer for memory)
+            k: neighbors per node
+            symmetrize: make graph undirected by mirroring edges
+
+        Returns:
+            edge_index: LongTensor [2, E]
+        """
+        edge_index = build_knn_graph(embeddings, k=k, symmetrize=symmetrize)
+        return edge_index
+
+    def _as_pyg_data(self, embeddings: torch.Tensor, edge_index: torch.Tensor):
+        """
+        Package embeddings + edge_index + labels/masks into a PyG Data object.
+        """
+        device = self.train_config.device
+        N = embeddings.size(0)
+
+        x = embeddings.to(device)
+        y = torch.as_tensor(self.labels, dtype=torch.long, device=device)
+
+        data = Data(x=x, edge_index=edge_index.to(device), y=y)
+
+        train_mask = torch.zeros(N, dtype=torch.bool, device=device); train_mask[self.train_indices] = True
+        val_mask   = torch.zeros(N, dtype=torch.bool, device=device);  val_mask[self.val_indices]   = True
+        test_mask  = torch.zeros(N, dtype=torch.bool, device=device);  test_mask[self.test_indices] = True
+
+        data.train_mask, data.valid_mask, data.test_mask = train_mask, val_mask, test_mask
+        return data
 
 
 
