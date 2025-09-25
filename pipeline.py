@@ -22,13 +22,13 @@ class ActiveLearningPipeline:
                  budget_per_iter=0.01,
                  test_ratio=0.2,
                  val_ratio=0.05,
-                 n_classes=10,
                  model_config=None
                  ):
         self.seed = seed
         self.feature_vectors = feature_vectors
         self.labels = labels
         self.iterations = iterations
+        self.total_size = len(self.labels)
         self.budget_per_iter = budget_per_iter
         self.train_config = train_config
         self.selection_criterion = selection_criterion
@@ -36,13 +36,10 @@ class ActiveLearningPipeline:
         self.model_name = model_name
         self.test_ratio = test_ratio
         self.val_ratio = val_ratio
-        self.n_classes = n_classes
+        self.n_classes = len(self.labels.unique())
+        print(f"Num. Classes: {self.n_classes}")
         self.model_config = model_config
         self.train_indices, self.val_indices, self.test_indices, self.available_pool_indices = self._split_points()
-
-
-    def _update_params(self, trained_model):
-        pass
 
     def run_pipeline(self):
         """
@@ -50,27 +47,27 @@ class ActiveLearningPipeline:
         """
         accuracy_scores = []
         for iteration in range(self.iterations):
-            if len(self.train_indices) > 600:
+            if len(self.train_indices) / self.total_size > 0.5:
                 # raise error if the train set is larger than 600 samples
-                raise ValueError('The train set is larger than 600 samples')
-            print(f'Iteration {iteration + 1}/{self.iterations}')
-            loss_steps, trained_model = self._train_model()
+                raise ValueError('The train set is larger than half the samples')
+            print(f'Iteration {iteration + 1}/{self.iterations}, Train Size: {len(self.train_indices)}')
+            _, trained_model = self._train_model()
             accuracy = self._evaluate_model(trained_model)
             accuracy_scores.append(accuracy)
             print(f'Accuracy: {accuracy}')
             print('----------------------------------------')
-            self._update_params(trained_model)
+            self._update_step(trained_model)
+            del trained_model
         return accuracy_scores
     
     def _split_points(self):
-        total_size = len(self.labels)
-        all_idx = np.arange(total_size)
+        all_idx = np.arange(self.total_size)
 
         rng = np.random.default_rng(self.seed)
 
-        train_n = int(round(self.budget_per_iter * total_size))
-        val_n = int(round(self.val_ratio * total_size))
-        test_n = int(round(self.test_ratio * total_size))
+        train_n = int(round(self.budget_per_iter * self.total_size))
+        val_n = int(round(self.val_ratio * self.total_size))
+        test_n = int(round(self.test_ratio * self.total_size))
 
         # splitting point for train / test / val / pool
         test_idx = rng.choice(all_idx, size=test_n, replace=False)
@@ -95,11 +92,12 @@ class ActiveLearningPipeline:
                                    model_config=self.model_config)
 
         return train_deep_model(model,
-                                    self.feature_vectors[self.train_indices],
-                                    self.labels[self.train_indices],
-                                    self.feature_vectors[self.val_indices],
-                                    self.labels[self.val_indices],
-                                    self.train_config)
+                                self.feature_vectors[self.train_indices],
+                                self.labels[self.train_indices],
+                                self.feature_vectors[self.val_indices],
+                                self.labels[self.val_indices],
+                                self.train_config
+                            )
 
     def _random_sampling(self):
         """
@@ -116,15 +114,15 @@ class ActiveLearningPipeline:
         :return:
         new_selected_samples: numpy array, new selected samples
         """
-        pool_nids = np.array(self.available_pool_indices)
-        pool_idx = [self.node_id_mapping[nid] for nid in pool_nids]
-        X_pool = self.feature_vectors[pool_idx]
+        x_pool = self.feature_vectors[self.available_pool_indices]
+        y_pool = self.labels[self.available_pool_indices]
         # predicted probabilities for each class
-        probs = trained_model.predict_proba(X_pool)
+        _, probs = validate(trained_model, x_pool, y_pool, self.train_config.batch_size, self.train_config.device)
         # uncertainty = 1 - max predicted class probability
-        uncertainties = 1 - np.max(probs, axis=1)
+        uncertainties = (1 - torch.max(probs, dim=1)[0]).numpy()
         # pick top-k most uncertain
-        selected_pos = np.argpartition(-uncertainties, self.budget_per_iter)[:self.budget_per_iter]
+        budget_n = int(self.budget_per_iter * self.total_size)
+        selected_pos = np.argpartition(-uncertainties, budget_n)[:budget_n]
         return selected_pos
 
     def _sampling(self, trained_model):
@@ -171,7 +169,7 @@ class ActiveLearningPipeline:
         if any(idx in self.train_indices for idx in self.test_indices):
             raise ValueError('Data leakage detected: test indices are in the train set.')
         
-        test_acc = validate(trained_model, self.feature_vectors[self.test_indices], self.labels[self.test_indices],
+        test_acc, _ = validate(trained_model, self.feature_vectors[self.test_indices], self.labels[self.test_indices],
                          self.train_config.batch_size, self.train_config.device)
         return test_acc
     
@@ -236,10 +234,7 @@ if __name__ == '__main__':
     parser.add_argument("--hidden_dim", type=int, default=256, help="Dimension for LSTM hidden state")
     parser.add_argument("--n_layers", type=int, default=2, help="Number of LSTM layers")
 
-    #added n_classes to configurables
-    parser.add_argument("--n_classes", type=int, default=10)
     # device
-
     parser.add_argument("--device", type=str, default='cuda')  
 
     hp = parser.parse_args()
@@ -259,7 +254,7 @@ if __name__ == '__main__':
     if hp.model_name == 'lstm':
         model_config = {
             'vocab_size': data_meta['vocab_size'],
-            'output_size': 1,  # Single output for sigmoid
+            'output_size': 2,  # Single output for sigmoid
             'embedding_dim': hp.embedding_dim,
             'hidden_dim': hp.hidden_dim,
             'n_layers': hp.n_layers
@@ -284,7 +279,6 @@ if __name__ == '__main__':
                                               budget_per_iter=hp.budget_per_iter_ratio,
                                               test_ratio=hp.test_ratio,
                                               val_ratio=hp.val_ratio,
-                                              n_classes=hp.n_classes,
                                               model_config=model_config
                                               )
             

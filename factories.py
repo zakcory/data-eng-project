@@ -33,6 +33,7 @@ def load_model_wrapper(model_name, n_classes, model_config, input_dim=None):
 
     elif model_name == "resnet18":
         return ModelClass(num_classes=n_classes)
+    
     elif model_name == "glassnet":
         if input_dim is None:
             raise ValueError("input_dim must be provided for GlassNet")

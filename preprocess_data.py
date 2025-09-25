@@ -5,14 +5,9 @@ from collections import Counter
 
 import numpy as np
 import torch
-import torch.nn as nn
-import torch.optim as optim
 from nltk.corpus import stopwords
-from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, LabelEncoder
-from thinc.util import to_categorical
-from torch.utils.data import DataLoader
-from torchvision import datasets, transforms, models
+from torchvision import datasets, transforms
 import pandas as pd
 
 # CIFAR10 loader
