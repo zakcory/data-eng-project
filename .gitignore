@@ -1,3 +1,4 @@
 .gitignore
 toy_dataset/*
 data/*
+__pycache__/*
