@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import torch
+import torch_geometric
 from torch_geometric.data import Data
 from collections import defaultdict
 import argparse
@@ -106,7 +107,10 @@ class ActiveLearningPipeline:
         new_selected_samples: numpy array, new selected samples
         """
         np.random.seed(self.seed)
-        return np.random.choice(list(range(len(self.available_pool_indices))), self.budget_per_iter, replace=False)
+        # Calculate the integer number of samples to select
+        budget_n = int(self.budget_per_iter * self.total_size)
+        # Use the integer budget_n for the size argument
+        return np.random.choice(list(range(len(self.available_pool_indices))), budget_n, replace=False)
 
     def _custom_sampling(self, trained_model):
         """
@@ -227,8 +231,8 @@ if __name__ == '__main__':
     parser.add_argument("--ckpt_dir", type=str, default="./ckpts")
     parser.add_argument("--log_every", type=int, default=10)
     # model and dataset name and path
-    parser.add_argument('--model_name', type=str, default="lstm")
-    parser.add_argument('--dataset_name', type=str, default="IMDB")
+    parser.add_argument('--model_name', type=str, default="beannet")
+    parser.add_argument('--dataset_name', type=str, default="drybean")
 
     parser.add_argument("--embedding_dim", type=int, default=128, help="Dimension for word embeddings")
     parser.add_argument("--hidden_dim", type=int, default=256, help="Dimension for LSTM hidden state")
@@ -240,7 +244,7 @@ if __name__ == '__main__':
     hp = parser.parse_args()
 
     # add training config into a configurator
-    train_config = TrainConfig(hp.epochs, hp.lr, hp.weight_decay, hp.momentum, hp.batch_size, hp.ckpt_dir, hp.log_every, hp.device) 
+    train_config = TrainConfig(hp.epochs, hp.lr, hp.weight_decay, hp.momentum, hp.batch_size, hp.ckpt_dir, hp.log_every, hp.device, hp.model_name)
 
     # X, y (entire set)
     x, y, data_meta = load_dataset_wrapper(hp.dataset_name)

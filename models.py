@@ -67,7 +67,7 @@ class GraphSAGE(torch.nn.Module):
         x = x.relu()
         x = self.conv2(x, edge_index)
         return x
-    
+
 # training function for the GNN model
 def train_gnn_model(model, data, cfg):
 
@@ -95,8 +95,10 @@ def train_gnn_model(model, data, cfg):
         if val_acc > best_val_acc:
             best_val_acc = val_acc
             best_loss = loss.item()
-            torch.save({'model_state': model.state_dict(), 'optim_state': optimizer.state_dict()}, cfg.ckpt_dir)
-    
+            #torch.save({'model_state': model.state_dict(), 'optim_state': optimizer.state_dict()}, cfg.ckpt_dir)
+            torch.save({'model_state': model.state_dict(), 'optim_state': optimizer.state_dict()},
+                       f"{cfg.ckpt_dir}/{cfg.model_name}.pth")
+
         if epoch % cfg.log_every == 0 or epoch == 1:
             print(f"Epoch: {epoch:03d}  "
                   f"Best Val Acc: {best_val_acc:.4f}  "
@@ -105,7 +107,7 @@ def train_gnn_model(model, data, cfg):
         loss_steps.append(loss.item())
     return loss_steps, model
 
-    
+
 
 # CNN model (for CIFAR10)
 class ResNet18(nn.Module):
@@ -114,7 +116,7 @@ class ResNet18(nn.Module):
             # load resnet18 without pretrained weights
             net = models.resnet18(weights=None)
 
-            # adjust first layers 
+            # adjust first layers
             net.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
             net.maxpool = nn.Identity()
 
@@ -128,32 +130,31 @@ class ResNet18(nn.Module):
     def forward(self, x, return_embedding=False):
         x = self.layers(x)
         x = torch.flatten(x, 1)
-        
-        # for the AL pipeline 
+
+        # for the AL pipeline
         if return_embedding:
             return x
         return self.fc(x)
 
-# MLP
-class GlassNet(nn.Module):
+# MLP for Dry Bean Dataset
+class BeanNet(nn.Module):
     def __init__(self, input_dim, num_classes):
-        super(GlassNet, self).__init__()
-        self.fc1 = nn.Linear(input_dim, 64)
-        self.fc2 = nn.Linear(64, 64)
-        self.fc3 = nn.Linear(64, 64)
-        self.fc4 = nn.Linear(64, 64)
-        self.fc5 = nn.Linear(64, num_classes)
+        super(BeanNet, self).__init__()
+        self.fc1 = nn.Linear(input_dim, 16)
+        self.fc2 = nn.Linear(16, 8)
+        self.fc3 = nn.Linear(8, num_classes)
+
     def forward(self, x):
         x = torch.relu(self.fc1(x))
         x = torch.relu(self.fc2(x))
-        x = torch.relu(self.fc3(x))
-        x = torch.relu(self.fc4(x))
+        x = self.fc3(x)  # No final activation, CrossEntropyLoss will handle it
         return x
 
 
 # TODO: make a tqdm here
 def train_deep_model(model, x_train, y_train, x_val, y_val, cfg, patience=40):
-    model.cuda()
+    if torch.cuda.is_available():
+        model.cuda()
 
     optimizer = torch.optim.Adam(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
     criterion = nn.CrossEntropyLoss()
@@ -163,7 +164,7 @@ def train_deep_model(model, x_train, y_train, x_val, y_val, cfg, patience=40):
     patience_count = 0
     best_loss = np.inf
 
-    n_batches = int(np.ceil(len(x_train) / cfg.batch_size)) 
+    n_batches = int(np.ceil(len(x_train) / cfg.batch_size))
     for epoch in range(1, cfg.epochs + 1):
 
         if patience_count > patience:
@@ -192,7 +193,7 @@ def train_deep_model(model, x_train, y_train, x_val, y_val, cfg, patience=40):
                     output = model(x)   # scores
 
                 optimizer.zero_grad()
-                loss = criterion(output, y)        
+                loss = criterion(output, y)
                 loss.backward()
 
                 optimizer.step()
@@ -203,10 +204,12 @@ def train_deep_model(model, x_train, y_train, x_val, y_val, cfg, patience=40):
             best_val_acc = val_acc
             best_loss = loss.item()
             # TODO: save model each iteration and then reproduce results without training again
-            torch.save({'model_state': model.state_dict(), 'optim_state': optimizer.state_dict()}, print(f"{cfg.ckpt_dir}/{cfg.model_name}.pth"))
+            #torch.save({'model_state': model.state_dict(), 'optim_state': optimizer.state_dict()}, print(f"{cfg.ckpt_dir}/{cfg.model_name}.pth"))
+            torch.save({'model_state': model.state_dict(), 'optim_state': optimizer.state_dict()},
+                       f"{cfg.ckpt_dir}/{cfg.model_name}.pth")
         else:
             patience_count += 1
-    
+
         if epoch % cfg.log_every == 0 or epoch == 1:
             print(f"Epoch: {epoch:03d}  "
                   f"Best Val Acc: {best_val_acc:.4f}  "
@@ -218,15 +221,16 @@ def train_deep_model(model, x_train, y_train, x_val, y_val, cfg, patience=40):
 
 
 class TrainConfig:
-    def __init__(self, epochs, lr, weight_decay, momentum, batch_size, ckpt_dir, log_every, device):
-       self.epochs = epochs 
-       self.lr = lr
-       self.weight_decay = weight_decay
-       self.momentum = momentum
-       self.batch_size = batch_size
-       self.ckpt_dir = ckpt_dir
-       self.log_every = log_every
-       self.device = device
+    def __init__(self, epochs, lr, weight_decay, momentum, batch_size, ckpt_dir, log_every, device, model_name):
+        self.epochs = epochs
+        self.lr = lr
+        self.weight_decay = weight_decay
+        self.momentum = momentum
+        self.batch_size = batch_size
+        self.ckpt_dir = ckpt_dir
+        self.log_every = log_every
+        self.device = device
+        self.model_name = model_name
     def __repr__(self):
         print(f"Train Config: epochs={self.epochs}, lr={self.lr}, bs={self.batch_size}, log every {self.log_every}")
 
@@ -257,7 +261,7 @@ def validate(model, x_val, y_val, bs, device):
 
         if isinstance(model, SentimentLSTM):
             h = model.init_hidden(x.size(0))
-            logits, _ = model(x, h) 
+            logits, _ = model(x, h)
         else:
             logits = model(x)
 

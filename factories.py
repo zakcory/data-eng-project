@@ -1,20 +1,20 @@
 # File: factories.py
 
 from models import * # Assuming you have this
-from preprocess_data import get_cifar10_data, get_glass_data, get_imdb_data
+from preprocess_data import get_cifar10_data, get_drybean_data, get_imdb_data
 
 # Store the classes themselves, not instantiated objects
 model_factory = {
     "resnet18": ResNet18,
     "gcn": GraphSAGE,
-    "glassnet": GlassNet,
+    "beannet": BeanNet, # Changed from glassnet
     "lstm": SentimentLSTM
 }
 
 # Store the functions themselves, not the data they return
 dataset_factory = {
     "cifar10": get_cifar10_data,
-    "glass": get_glass_data,
+    "drybean": get_drybean_data, # Changed from glass
     "IMDB": get_imdb_data
 }
 
@@ -33,10 +33,10 @@ def load_model_wrapper(model_name, n_classes, model_config, input_dim=None):
 
     elif model_name == "resnet18":
         return ModelClass(num_classes=n_classes)
-    
-    elif model_name == "glassnet":
+
+    elif model_name == "beannet": # Changed from glassnet
         if input_dim is None:
-            raise ValueError("input_dim must be provided for GlassNet")
+            raise ValueError("input_dim must be provided for BeanNet")
         return ModelClass(input_dim=input_dim, num_classes=n_classes)
     else:
         return ModelClass()
@@ -50,9 +50,11 @@ def load_dataset_wrapper(dataset_name):
     # Define file paths here
     paths = {
         "cifar10": "./data/cifar10",
-        "glass": "./data/glass/glass.csv",
+        "drybean": "./data/Dry_Bean.csv", # Changed from glass
         "IMDB": "./data/IMDB/IMDB Dataset.csv"
     }
 
     data_loader_func = dataset_factory[dataset_name]  # Get the function
-    return data_loader_func(paths[dataset_name])  # Call it with the path
+    # Call it with the path, and handle the possibility of it returning three values
+    result = data_loader_func(paths[dataset_name])
+    return result

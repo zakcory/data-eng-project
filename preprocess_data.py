@@ -24,45 +24,45 @@ def get_cifar10_data(data_dir="./data/cifar10"):
     train_set = datasets.CIFAR10(root=data_dir, train=True, download=True, transform=train_tf)
     test_set = datasets.CIFAR10(root=data_dir, train=False, download=True, transform=test_tf)
 
-    # we need the entire dataset for tensor indexing later on 
+    # we need the entire dataset for tensor indexing later on
     X_train = torch.from_numpy(train_set.data)
-    X = torch.cat([X_train, torch.from_numpy(test_set.data)], dim=0)  
+    X = torch.cat([X_train, torch.from_numpy(test_set.data)], dim=0)
     y = torch.tensor(train_set.targets + test_set.targets, dtype=torch.long)
 
     # normalizing the tensor
     X = X.permute(0, 3, 1, 2).float().div_(255.0)
-    mean = X.mean(dim=(0, 2, 3), keepdim=True)              
-    std  = X.std(dim=(0, 2, 3), keepdim=True)  
+    mean = X.mean(dim=(0, 2, 3), keepdim=True)
+    std  = X.std(dim=(0, 2, 3), keepdim=True)
     print(mean, std)
     X = (X - mean) / std
 
     return X, y
 
 
-def get_glass_data(data_dir="./data/glass/glass.csv"):
+def get_drybean_data(data_dir="./data/Dry_Bean.csv"):
     """
-    Loads and preprocesses the entire glass dataset.
+    Loads and preprocesses the entire Dry Bean dataset.
     """
     df = pd.read_csv(data_dir)
 
     # 1. Separate features (X) and the target label (y)
-    X = df.drop('Type', axis=1).values
-    y = df['Type'].values
+    X = df.drop('Class', axis=1).values
+    y = df['Class'].values
 
     # 2. Scale the features
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
 
-
+    # 3. Encode the string labels into integers
     encoder = LabelEncoder()
     y_encoded = encoder.fit_transform(y)
 
+    # 4. Convert to PyTorch Tensors
     X_tensor = torch.from_numpy(X_scaled).float()
     y_tensor = torch.from_numpy(y_encoded).long()
 
-    return X_tensor, y_tensor
-
-
+    # The dataset loader should return a metadata object for consistency, even if it's empty
+    return X_tensor, y_tensor, {}
 
 
 def preprocess_imdb_text(text):
