@@ -26,6 +26,7 @@ class ActiveLearningPipeline:
                  model_config=None
                  ):
         self.seed = seed
+        self.rng = np.random.default_rng(self.seed)
         self.feature_vectors = feature_vectors
         self.labels = labels
         self.iterations = iterations
@@ -64,20 +65,18 @@ class ActiveLearningPipeline:
     def _split_points(self):
         all_idx = np.arange(self.total_size)
 
-        rng = np.random.default_rng(self.seed)
-
         train_n = int(round(self.budget_per_iter * self.total_size))
         val_n = int(round(self.val_ratio * self.total_size))
         test_n = int(round(self.test_ratio * self.total_size))
 
         # splitting point for train / test / val / pool
-        test_idx = rng.choice(all_idx, size=test_n, replace=False)
+        test_idx = self.rng.choice(all_idx, size=test_n, replace=False)
         rem = np.setdiff1d(all_idx, test_idx, assume_unique=False)
 
-        val_idx = rng.choice(rem, size=val_n, replace=False)
+        val_idx = self.rng.choice(rem, size=val_n, replace=False)
         rem = np.setdiff1d(rem, val_idx, assume_unique=False)
 
-        train_idx = rng.choice(rem, size=train_n, replace=False)
+        train_idx = self.rng.choice(rem, size=train_n, replace=False)
         pool_idx  = np.setdiff1d(rem, train_idx, assume_unique=False)
 
         return train_idx.tolist(), val_idx.tolist(), test_idx.tolist(), pool_idx.tolist()
@@ -106,11 +105,11 @@ class ActiveLearningPipeline:
         :return:
         new_selected_samples: numpy array, new selected samples
         """
-        np.random.seed(self.seed)
         # Calculate the integer number of samples to select
         budget_n = int(self.budget_per_iter * self.total_size)
         # Use the integer budget_n for the size argument
-        return np.random.choice(list(range(len(self.available_pool_indices))), budget_n, replace=False)
+        return self.rng.choice(len(self.available_pool_indices), budget_n, replace=False)
+
 
     def _custom_sampling(self, trained_model):
         """
