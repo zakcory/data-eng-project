@@ -141,7 +141,7 @@ class ActiveLearningPipeline:
         :return:
         new_selected: list, newly selected samples
         """
-        if self.selection_criterion == 'custom':
+        if self.selection_criterion in ['least_confidence', 'entropy', 'margin']:
             pos = self._custom_sampling(trained_model)
         elif self.selection_criterion == 'random':
             pos = self._random_sampling()
