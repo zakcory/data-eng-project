@@ -112,18 +112,25 @@ class ActiveLearningPipeline:
 
 
     def _custom_sampling(self, trained_model):
-        """
-        Custom sampling method to be implemented
-        :return:
-        new_selected_samples: numpy array, new selected samples
-        """
         x_pool = self.feature_vectors[self.available_pool_indices]
         y_pool = self.labels[self.available_pool_indices]
-        # predicted probabilities for each class
-        _, probs = validate(trained_model, x_pool, y_pool, self.train_config.batch_size, self.train_config.device)
-        # uncertainty = 1 - max predicted class probability
-        uncertainties = (1 - torch.max(probs, dim=1)[0]).numpy()
-        # pick top-k most uncertain
+        
+        _, probs = validate(trained_model, x_pool, y_pool, 
+                        self.train_config.batch_size, 
+                        self.train_config.device)
+        
+        if self.selection_criterion == 'least_confidence':
+            uncertainties = (1 - torch.max(probs, dim=1)[0]).numpy()
+        
+        elif self.selection_criterion == 'entropy':
+            uncertainties = (-torch.sum(probs * torch.log(probs + 1e-10), dim=1)).numpy()
+        
+        elif self.selection_criterion == 'margin':
+            sorted_probs, _ = torch.sort(probs, dim=1, descending=True)
+            margins = sorted_probs[:, 0] - sorted_probs[:, 1]
+            uncertainties = -margins.numpy()  # Negative so high uncertainty = high value
+    
+        # Select top-k most uncertain
         budget_n = int(self.budget_per_iter * self.total_size)
         selected_pos = np.argpartition(-uncertainties, budget_n)[:budget_n]
         return selected_pos
@@ -250,7 +257,7 @@ if __name__ == '__main__':
 
 
     # TODO: add more criterias here
-    selection_criteria = ['custom', 'random']
+    selection_criteria = ['least_confidence', 'entropy', 'margin', 'random']
     accuracy_scores_dict = defaultdict(list)
 
     model_config = None
