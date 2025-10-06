@@ -19,7 +19,7 @@ class ActiveLearningPipeline:
                  dataset_name,
                  model_name,
                  train_config,
-                 iterations=20,
+                 iterations=5,
                  budget_per_iter=0.01,
                  test_ratio=0.2,
                  val_ratio=0.05,
@@ -271,6 +271,9 @@ if __name__ == '__main__':
     for i, seed in enumerate(range(1, 4)):
         print(f"seed {seed}")
         for criterion in selection_criteria:
+            np.random.seed(seed)
+            torch.manual_seed(seed)
+            torch.cuda.manual_seed_all(seed)
             AL_class = ActiveLearningPipeline(seed=seed,
                                               feature_vectors=x,
                                               labels=y,
