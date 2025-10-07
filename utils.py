@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import torch
 
 
-def generate_plot(accuracy_scores_dict):
+def generate_plot(accuracy_scores_dict, seed, dataset_name):
     num_iters = len(accuracy_scores_dict['random'])
     for criterion, accuracy_scores in accuracy_scores_dict.items():
         x_vals = list(range(1, len(accuracy_scores) + 1))
@@ -12,7 +12,8 @@ def generate_plot(accuracy_scores_dict):
     plt.xlim(1, num_iters)
     plt.xticks(range(1, num_iters + 1))
     plt.legend()
-    plt.show()
+    plt.title(f'AL - Accuracy vs. Iterations, Seed: {seed}, Dataset: {dataset_name}')
+    plt.savefig(f'plot_{seed}_{dataset_name}')
 
 
 def build_knn_graph(embeddings: torch.Tensor, k: int = 10, symmetrize: bool = True) -> torch.LongTensor:

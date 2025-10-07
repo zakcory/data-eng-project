@@ -33,10 +33,9 @@ def get_cifar10_data(data_dir="./data/cifar10"):
     X = X.permute(0, 3, 1, 2).float().div_(255.0)
     mean = X.mean(dim=(0, 2, 3), keepdim=True)
     std  = X.std(dim=(0, 2, 3), keepdim=True)
-    print(mean, std)
     X = (X - mean) / std
 
-    return X, y
+    return X, y, {}
 
 
 def get_drybean_data(data_dir="./data/Dry_Bean.csv"):

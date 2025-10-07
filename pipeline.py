@@ -229,7 +229,7 @@ if __name__ == '__main__':
     parser.add_argument("--test_ratio", type=float, default=0.2)
     parser.add_argument("--val_ratio", type=float, default=0.05)
     # training model configs
-    parser.add_argument("--epochs", type=int, default=100)
+    parser.add_argument("--epochs", type=int, default=200)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--weight_decay", type=float, default=5e-4)
     parser.add_argument("--momentum", type=float, default=0.9)
@@ -272,12 +272,13 @@ if __name__ == '__main__':
 
 
 
-    print(f"\n-----------STARTING ACTIVE LEARNING PIPELINE FOR DATASET {hp.dataset_name} WITH MODEL {hp.model_name}-------------------\n")
+    print(f"\n----------- STARTING ACTIVE LEARNING PIPELINE FOR DATASET {hp.dataset_name} WITH MODEL {hp.model_name} -------------------\n")
 
 
     for i, seed in enumerate(range(1, 4)):
-        print(f"seed {seed}")
+        print(f"---- SEED {seed} ----")
         for criterion in selection_criteria:
+            print(f"----   ----")
             np.random.seed(seed)
             torch.manual_seed(seed)
             torch.cuda.manual_seed_all(seed)
@@ -296,5 +297,5 @@ if __name__ == '__main__':
                                               )
             
             accuracy_scores_dict[criterion] = AL_class.run_pipeline()
-        generate_plot(accuracy_scores_dict)
+        generate_plot(accuracy_scores_dict, seed, hp.dataset_name)
         print(f"======= Finished iteration for seed {seed} =======")

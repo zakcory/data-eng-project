@@ -7,6 +7,7 @@ import torch.nn as nn
 from torchvision import models
 import numpy as np
 import torch.optim
+from copy import deepcopy
 
 
 
@@ -163,6 +164,7 @@ def train_deep_model(model, x_train, y_train, x_val, y_val, cfg, patience=40):
     best_val_acc = 0.
     patience_count = 0
     best_loss = np.inf
+    best_model = None
 
     n_batches = int(np.ceil(len(x_train) / cfg.batch_size))
     for epoch in range(1, cfg.epochs + 1):
@@ -203,10 +205,7 @@ def train_deep_model(model, x_train, y_train, x_val, y_val, cfg, patience=40):
             patience_count = 0
             best_val_acc = val_acc
             best_loss = loss.item()
-            # TODO: save model each iteration and then reproduce results without training again
-            #torch.save({'model_state': model.state_dict(), 'optim_state': optimizer.state_dict()}, print(f"{cfg.ckpt_dir}/{cfg.model_name}.pth"))
-            torch.save({'model_state': model.state_dict(), 'optim_state': optimizer.state_dict()},
-                       f"{cfg.ckpt_dir}/{cfg.model_name}.pth")
+            best_model = deepcopy(model)
         else:
             patience_count += 1
 
@@ -217,7 +216,7 @@ def train_deep_model(model, x_train, y_train, x_val, y_val, cfg, patience=40):
             )
         loss_steps.append(loss.item())
 
-    return loss_steps, model
+    return loss_steps, best_model
 
 
 class TrainConfig:
