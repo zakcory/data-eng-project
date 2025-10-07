@@ -5,6 +5,8 @@ import torch_geometric
 from torch_geometric.data import Data
 from collections import defaultdict
 import argparse
+from tqdm import tqdm
+import pickle
 
 from utils import *
 from models import *
@@ -48,18 +50,23 @@ class ActiveLearningPipeline:
         Run the active learning pipeline
         """
         accuracy_scores = []
-        for iteration in range(self.iterations):
+        bar = tqdm(range(self.iterations), desc='AL Iters')
+        for iteration in bar:
             if len(self.train_indices) / self.total_size > 0.5:
-                # raise error if the train set is larger than 600 samples
+                # raise error if the train set is larger than half the samples
                 raise ValueError('The train set is larger than half the samples')
             print(f'Iteration {iteration + 1}/{self.iterations}, Train Size: {len(self.train_indices)}')
             _, trained_model = self._train_model()
             accuracy = self._evaluate_model(trained_model)
+            bar.set_postfix({'Accuracy': accuracy*100})
             accuracy_scores.append(accuracy)
             print(f'Accuracy: {accuracy}')
             print('----------------------------------------')
             self._update_step(trained_model)
+
             del trained_model
+            torch.cuda.empty_cache()
+        
         return accuracy_scores
     
     def _split_points(self):
@@ -235,10 +242,10 @@ if __name__ == '__main__':
     parser.add_argument("--momentum", type=float, default=0.9)
     parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument("--ckpt_dir", type=str, default="./ckpts")
-    parser.add_argument("--log_every", type=int, default=10)
+    parser.add_argument("--log_every", type=int, default=25)
     # model and dataset name and path
-    parser.add_argument('--model_name', type=str, default="beannet")
-    parser.add_argument('--dataset_name', type=str, default="drybean")
+    parser.add_argument('--model_name', type=str, default="lstm")
+    parser.add_argument('--dataset_name', type=str, default="IMDB")
 
     parser.add_argument("--embedding_dim", type=int, default=128, help="Dimension for word embeddings")
     parser.add_argument("--hidden_dim", type=int, default=256, help="Dimension for LSTM hidden state")
@@ -275,10 +282,10 @@ if __name__ == '__main__':
     print(f"\n----------- STARTING ACTIVE LEARNING PIPELINE FOR DATASET {hp.dataset_name} WITH MODEL {hp.model_name} -------------------\n")
 
 
-    for i, seed in enumerate(range(1, 4)):
+    for i, seed in enumerate(range(2, 4)):
         print(f"---- SEED {seed} ----")
         for criterion in selection_criteria:
-            print(f"----   ----")
+            print(f"----  Criterion: {criterion} ----")
             np.random.seed(seed)
             torch.manual_seed(seed)
             torch.cuda.manual_seed_all(seed)
@@ -297,5 +304,9 @@ if __name__ == '__main__':
                                               )
             
             accuracy_scores_dict[criterion] = AL_class.run_pipeline()
+
+        with open(f'accuracies_seed={seed}.pkl', 'wb') as f:
+                pickle.dump(accuracy_scores_dict, f)  
+
         generate_plot(accuracy_scores_dict, seed, hp.dataset_name)
         print(f"======= Finished iteration for seed {seed} =======")
