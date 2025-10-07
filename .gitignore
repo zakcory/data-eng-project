@@ -2,3 +2,4 @@
 toy_dataset/*
 data/*
 __pycache__/*
+ckpts/*
