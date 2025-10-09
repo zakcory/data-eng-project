@@ -8,6 +8,7 @@ from torchvision import models
 import numpy as np
 import torch.optim
 from copy import deepcopy
+from torch.optim.lr_scheduler import LinearLR
 
 
 
@@ -153,12 +154,16 @@ class BeanNet(nn.Module):
 
 
 # TODO: make a tqdm here
-def train_deep_model(model, x_train, y_train, x_val, y_val, cfg, patience=40):
+def train_deep_model(model, x_train, y_train, x_val, y_val, cfg, fine_tune, first_round, patience=40):
     if torch.cuda.is_available():
         model.cuda()
 
     optimizer = torch.optim.Adam(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
     criterion = nn.CrossEntropyLoss()
+    
+    # for fine-tuning
+    scheduler = LinearLR(optimizer, start_factor=1.0, end_factor=0.5, total_iters=5) 
+    epochs = 10 if (fine_tune and not first_round) else cfg.epochs
 
     loss_steps = list()
     best_val_acc = 0.
@@ -167,7 +172,7 @@ def train_deep_model(model, x_train, y_train, x_val, y_val, cfg, patience=40):
     best_model = None
 
     n_batches = int(np.ceil(len(x_train) / cfg.batch_size))
-    for epoch in range(1, cfg.epochs + 1):
+    for epoch in range(1, epochs + 1):
 
         if patience_count > patience:
             print(f"Breaking early... (patience)")
@@ -199,6 +204,9 @@ def train_deep_model(model, x_train, y_train, x_val, y_val, cfg, patience=40):
                 loss.backward()
 
                 optimizer.step()
+
+        if fine_tune and not first_round:
+            scheduler.step()
 
         val_acc, _ = validate(model, x_val, y_val, cfg.batch_size, cfg.device)
         if val_acc > best_val_acc:

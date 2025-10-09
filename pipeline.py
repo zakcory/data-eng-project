@@ -25,7 +25,9 @@ class ActiveLearningPipeline:
                  budget_per_iter=0.01,
                  test_ratio=0.2,
                  val_ratio=0.05,
-                 model_config=None
+                 model_config=None,
+                 load_from_pkl=False,
+                 fine_tune=False
                  ):
         self.seed = seed
         self.rng = np.random.default_rng(self.seed)
@@ -44,6 +46,9 @@ class ActiveLearningPipeline:
         print(f"Num. Classes: {self.n_classes}")
         self.model_config = model_config
         self.train_indices, self.val_indices, self.test_indices, self.available_pool_indices = self._split_points()
+        self.load_from_pkl = load_from_pkl
+        self.fine_tune = fine_tune
+        self.current_model = None
 
     def run_pipeline(self):
         """
@@ -64,8 +69,9 @@ class ActiveLearningPipeline:
             print('----------------------------------------')
             self._update_step(trained_model)
 
-            del trained_model
-            torch.cuda.empty_cache()
+            if not self.fine_tune:
+                del trained_model
+                torch.cuda.empty_cache()
         
         return accuracy_scores
     
@@ -93,18 +99,33 @@ class ActiveLearningPipeline:
         Train the model
         """
         input_dim = self.feature_vectors.shape[1]
-        model = load_model_wrapper(self.model_name,
-                                   n_classes=self.n_classes,
-                                   input_dim=input_dim,
-                                   model_config=self.model_config)
+        first_round = False
 
-        return train_deep_model(model,
+        if self.fine_tune and (self.current_model is not None):
+            model = self.current_model
+        else:
+            model = load_model_wrapper(self.model_name,
+                                    n_classes=self.n_classes,
+                                    input_dim=input_dim,
+                                    model_config=self.model_config)
+            first_round = True
+
+        loss_steps, trained_model = train_deep_model(model,
                                 self.feature_vectors[self.train_indices],
                                 self.labels[self.train_indices],
                                 self.feature_vectors[self.val_indices],
                                 self.labels[self.val_indices],
-                                self.train_config
+                                self.train_config,
+                                self.fine_tune,
+                                first_round
                             )
+        
+        if self.fine_tune:
+            self.current_model = trained_model
+        else:
+            self.current_model = None
+
+        return loss_steps, trained_model
 
     def _random_sampling(self):
         """
@@ -251,6 +272,12 @@ if __name__ == '__main__':
     parser.add_argument("--hidden_dim", type=int, default=256, help="Dimension for LSTM hidden state")
     parser.add_argument("--n_layers", type=int, default=2, help="Number of LSTM layers")
 
+    # flag to fine tune and not retrain from scratch
+    parser.add_argument("--fine_tune", action='store_true')
+
+    # flag to load the results from previous runs
+    parser.add_argument("--load_from_pkl", action='store_true')
+
     # device
     parser.add_argument("--device", type=str, default='cuda')  
 
@@ -279,34 +306,42 @@ if __name__ == '__main__':
 
 
 
-    print(f"\n----------- STARTING ACTIVE LEARNING PIPELINE FOR DATASET {hp.dataset_name} WITH MODEL {hp.model_name} -------------------\n")
+    print(f"\n----------- STARTING ACTIVE LEARNING PIPELINE FOR DATASET {hp.dataset_name} WITH MODEL {hp.model_name}, FINETUNING (?) -> {hp.fine_tune} -------------------\n")
 
 
-    for i, seed in enumerate(range(2, 4)):
+    for i, seed in enumerate(range(1, 4)):
         print(f"---- SEED {seed} ----")
-        for criterion in selection_criteria:
-            print(f"----  Criterion: {criterion} ----")
-            np.random.seed(seed)
-            torch.manual_seed(seed)
-            torch.cuda.manual_seed_all(seed)
-            AL_class = ActiveLearningPipeline(seed=seed,
-                                              feature_vectors=x,
-                                              labels=y,
-                                              selection_criterion=criterion,
-                                              dataset_name=hp.dataset_name,
-                                              model_name=hp.model_name,
-                                              train_config=train_config,
-                                              iterations=hp.iterations,
-                                              budget_per_iter=hp.budget_per_iter_ratio,
-                                              test_ratio=hp.test_ratio,
-                                              val_ratio=hp.val_ratio,
-                                              model_config=model_config
-                                              )
-            
-            accuracy_scores_dict[criterion] = AL_class.run_pipeline()
 
-        with open(f'accuracies_seed={seed}.pkl', 'wb') as f:
-                pickle.dump(accuracy_scores_dict, f)  
+        if not hp.load_from_pkl:
+            for criterion in selection_criteria:
+                print(f"----  Criterion: {criterion} ----")
+                np.random.seed(seed)
+                torch.manual_seed(seed)
+                torch.cuda.manual_seed_all(seed)
+                AL_class = ActiveLearningPipeline(seed=seed,
+                                                feature_vectors=x,
+                                                labels=y,
+                                                selection_criterion=criterion,
+                                                dataset_name=hp.dataset_name,
+                                                model_name=hp.model_name,
+                                                train_config=train_config,
+                                                iterations=hp.iterations,
+                                                budget_per_iter=hp.budget_per_iter_ratio,
+                                                test_ratio=hp.test_ratio,
+                                                val_ratio=hp.val_ratio,
+                                                model_config=model_config,
+                                                load_from_pkl=hp.load_from_pkl,
+                                                fine_tune=hp.fine_tune
+                                                )
+                
+                accuracy_scores_dict[criterion] = AL_class.run_pipeline()
+
+            with open(f'saved_accs/accuracies_seed={seed}_dataset={hp.dataset_name}_finetune={hp.fine_tune}.pkl', 'wb') as f:
+                    pickle.dump(accuracy_scores_dict, f)  
+
+        else:
+            with open(f'saved_accs/accuracies_seed={seed}_dataset={hp.dataset_name}_finetune={hp.fine_tune}.pkl', 'rb') as f:
+                accuracy_scores_dict = pickle.load(f)
 
         generate_plot(accuracy_scores_dict, seed, hp.dataset_name)
         print(f"======= Finished iteration for seed {seed} =======")

@@ -12,8 +12,9 @@ def generate_plot(accuracy_scores_dict, seed, dataset_name):
     plt.xlim(1, num_iters)
     plt.xticks(range(1, num_iters + 1))
     plt.legend()
-    plt.title(f'AL - Accuracy vs. Iterations, Seed: {seed}, Dataset: {dataset_name}')
-    plt.savefig(f'plot_{seed}_{dataset_name}')
+    plt.title(f'AL - Accuracy vs. Iterations, Seed: {seed}, Dataset: {dataset_name}, FT')
+    plt.savefig(f'plot_{seed}_{dataset_name}_FT')
+    plt.close()
 
 
 def build_knn_graph(embeddings: torch.Tensor, k: int = 10, symmetrize: bool = True) -> torch.LongTensor:
