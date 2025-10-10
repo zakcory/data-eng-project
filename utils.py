@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
 import torch
+import numpy as np
 
 
 def generate_plot(accuracy_scores_dict, seed, dataset_name):
@@ -15,6 +16,14 @@ def generate_plot(accuracy_scores_dict, seed, dataset_name):
     plt.title(f'AL - Accuracy vs. Iterations, Seed: {seed}, Dataset: {dataset_name}, FT')
     plt.savefig(f'plot_{seed}_{dataset_name}_FT')
     plt.close()
+
+def seed_all(seed):
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    torch.use_deterministic_algorithms(True)
 
 
 def build_knn_graph(embeddings: torch.Tensor, k: int = 10, symmetrize: bool = True) -> torch.LongTensor:

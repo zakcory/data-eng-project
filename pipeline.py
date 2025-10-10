@@ -315,9 +315,9 @@ if __name__ == '__main__':
         if not hp.load_from_pkl:
             for criterion in selection_criteria:
                 print(f"----  Criterion: {criterion} ----")
-                np.random.seed(seed)
-                torch.manual_seed(seed)
-                torch.cuda.manual_seed_all(seed)
+
+                seed_all(seed)
+                
                 AL_class = ActiveLearningPipeline(seed=seed,
                                                 feature_vectors=x,
                                                 labels=y,

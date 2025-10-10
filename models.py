@@ -162,9 +162,16 @@ def train_deep_model(model, x_train, y_train, x_val, y_val, cfg, fine_tune, firs
     criterion = nn.CrossEntropyLoss()
     
     # for fine-tuning
-    scheduler = LinearLR(optimizer, start_factor=1.0, end_factor=0.5, total_iters=5) 
-    epochs = 10 if (fine_tune and not first_round) else cfg.epochs
+    if (fine_tune and not first_round):
+        epochs = 50 if cfg.model_name == 'resnet18' else 10
 
+        # reinitialize the linear head because of geometry of images
+        if cfg.model_name == 'resnet18': reinit_fc_head(model)
+
+    else:
+        epochs = cfg.epochs
+    scheduler = LinearLR(optimizer, start_factor=1.0, end_factor=0.5, total_iters=0.5*epochs) 
+    
     loss_steps = list()
     best_val_acc = 0.
     patience_count = 0
@@ -186,7 +193,7 @@ def train_deep_model(model, x_train, y_train, x_val, y_val, cfg, fine_tune, firs
                 x = x_train[start_idx:end_idx, :].detach().clone().to(cfg.device)
                 y = y_train[start_idx:end_idx].detach().clone().to(cfg.device)
 
-                if isinstance(model, SentimentLSTM):
+                if cfg.model_name == 'lstm':
 
                     current_batch_size = x.size(0)
                     h = model.init_hidden(current_batch_size)
@@ -223,6 +230,9 @@ def train_deep_model(model, x_train, y_train, x_val, y_val, cfg, fine_tune, firs
                   f"Best Loss: {best_loss:.4f}  "
             )
         loss_steps.append(loss.item())
+
+    if cfg.model_name == 'resnet18' and fine_tune and not first_round:
+        recalibrate_bn(best_model, x_train, cfg)
 
     return loss_steps, best_model
 
@@ -278,3 +288,25 @@ def validate(model, x_val, y_val, bs, device):
         total += y.numel()
 
     return (correct / total), torch.cat(probs_stack, dim=0)
+
+def recalibrate_bn(model, x_full, cfg):
+    was_training = model.training
+    model.train()
+    bs = cfg.batch_size
+    device = cfg.device
+    n_batches = int(np.ceil(len(x_full) / bs))
+    with torch.no_grad():
+        for batch_idx in range(n_batches):
+            start_idx = batch_idx * bs
+            end_idx = min((batch_idx + 1) * bs, len(x_full))
+            x = x_full[start_idx:end_idx, :].detach().clone().to(device)
+            model(x)
+            if batch_idx >= 50:  
+                break
+    model.train(was_training)
+
+def reinit_fc_head(model):
+    head = model.fc
+    nn.init.kaiming_normal_(head.weight, nonlinearity='linear')
+    if head.bias is not None:
+        nn.init.zeros_(head.bias)
