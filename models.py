@@ -44,7 +44,7 @@ class SentimentLSTM(nn.Module):
         out = self.fc(out)
 
         # Return last sigmoid output and hidden state
-        return out, hidden
+        return out, hidden, lstm_out
 
     def init_hidden(self, batch_size):
         # Create two new tensors with sizes n_layers x batch_size x hidden_dim,
@@ -71,7 +71,7 @@ class GraphSAGE(torch.nn.Module):
         return x
 
 # training function for the GNN model
-def train_gnn_model(model, data, cfg):
+def train_gnn_model(model, data, cfg, patience=10):
 
     optimizer = torch.optim.Adam(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
     criterion = torch.nn.CrossEntropyLoss()
@@ -79,8 +79,14 @@ def train_gnn_model(model, data, cfg):
     loss_steps = list()
     best_val_acc = 0
     best_loss = np.inf
+    best_model = None
+    patience_count = 0
 
-    for epoch in range(1, cfg.epochs+1):
+    for epoch in range(1, cfg.gnn_epochs+1):
+
+        if patience_count > patience:
+            print(f"Breaking early... (patience)")
+            break
 
         model.train()
         optimizer.zero_grad()
@@ -89,25 +95,24 @@ def train_gnn_model(model, data, cfg):
         loss.backward()
         optimizer.step()
 
-        model.eval()
-        with torch.no_grad():
-            logits = model(data.x, data.edge_index)
-        val_acc = accuracy(logits[data.valid_mask], data.y[data.valid_mask])
+        val_acc, _ = validate_gnn(model, data, data.valid_mask)
 
         if val_acc > best_val_acc:
             best_val_acc = val_acc
             best_loss = loss.item()
-            #torch.save({'model_state': model.state_dict(), 'optim_state': optimizer.state_dict()}, cfg.ckpt_dir)
-            torch.save({'model_state': model.state_dict(), 'optim_state': optimizer.state_dict()},
-                       f"{cfg.ckpt_dir}/{cfg.model_name}.pth")
+            best_model = deepcopy(model)
+            patience_count = 0
+        else:
+            patience_count += 1
 
         if epoch % cfg.log_every == 0 or epoch == 1:
+            print("\n------------------Propagating labels with GNN----------------------------\n")
             print(f"Epoch: {epoch:03d}  "
                   f"Best Val Acc: {best_val_acc:.4f}  "
                   f"Best Loss: {best_loss:.4f}  "
             )
         loss_steps.append(loss.item())
-    return loss_steps, model
+    return loss_steps, best_model
 
 
 
@@ -131,26 +136,21 @@ class ResNet18(nn.Module):
 
     def forward(self, x, return_embedding=False):
         x = self.layers(x)
-        x = torch.flatten(x, 1)
+        inter_emb = torch.flatten(x, 1)
 
-        # for the AL pipeline
-        if return_embedding:
-            return x
-        return self.fc(x)
+        return self.fc(inter_emb), inter_emb
 
 # MLP for Dry Bean Dataset
 class BeanNet(nn.Module):
     def __init__(self, input_dim, num_classes):
         super(BeanNet, self).__init__()
-        self.fc1 = nn.Linear(input_dim, 16)
-        self.fc2 = nn.Linear(16, 8)
-        self.fc3 = nn.Linear(8, num_classes)
+        self.fc1 = nn.Linear(input_dim, 64)
+        self.fc3 = nn.Linear(64, num_classes)
 
     def forward(self, x):
-        x = torch.relu(self.fc1(x))
-        x = torch.relu(self.fc2(x))
-        x = self.fc3(x)  # No final activation, CrossEntropyLoss will handle it
-        return x
+        inter_emb = torch.relu(self.fc1(x))
+        x = self.fc3(inter_emb) 
+        return x, inter_emb
 
 
 # TODO: make a tqdm here
@@ -165,7 +165,14 @@ def train_deep_model(model, x_train, y_train, x_val, y_val, cfg, fine_tune, firs
     if (fine_tune and not first_round):
         epochs = 50 if cfg.model_name == 'resnet18' else 10
 
-        # reinitialize the linear head because of geometry of images
+        if cfg.model_name == 'resnet18':
+            50
+        elif cfg.model_name == 'beannet':
+            1
+        elif cfg.model_name == 'lstm':
+            10
+
+        # reinitialize the linear head for CNN
         if cfg.model_name == 'resnet18': reinit_fc_head(model)
 
     else:
@@ -202,9 +209,9 @@ def train_deep_model(model, x_train, y_train, x_val, y_val, cfg, fine_tune, firs
                     h = tuple(s.detach() for s in h)
 
                     y = y.long()
-                    output, h = model(x, h)
+                    output, h, _ = model(x, h)
                 else:
-                    output = model(x)   # scores
+                    output, _ = model(x)   # scores
 
                 optimizer.zero_grad()
                 loss = criterion(output, y)
@@ -215,7 +222,7 @@ def train_deep_model(model, x_train, y_train, x_val, y_val, cfg, fine_tune, firs
         if fine_tune and not first_round:
             scheduler.step()
 
-        val_acc, _ = validate(model, x_val, y_val, cfg.batch_size, cfg.device)
+        val_acc, _, _ = validate(model, x_val, y_val, cfg.batch_size, cfg.device)
         if val_acc > best_val_acc:
             patience_count = 0
             best_val_acc = val_acc
@@ -238,8 +245,9 @@ def train_deep_model(model, x_train, y_train, x_val, y_val, cfg, fine_tune, firs
 
 
 class TrainConfig:
-    def __init__(self, epochs, lr, weight_decay, momentum, batch_size, ckpt_dir, log_every, device, model_name):
+    def __init__(self, epochs, gnn_epochs, lr, weight_decay, momentum, batch_size, ckpt_dir, log_every, device, model_name):
         self.epochs = epochs
+        self.gnn_epochs = gnn_epochs
         self.lr = lr
         self.weight_decay = weight_decay
         self.momentum = momentum
@@ -254,12 +262,16 @@ class TrainConfig:
 
 
 # useful functions for models
-
 @torch.no_grad()
-def accuracy(logits, y):
-    pred = logits.argmax(dim=1)
-    y = y.view(-1)
-    return (pred == y).float().mean().item()
+def validate_gnn(model, data, mask):
+    model.eval()
+    probs = F.softmax(model(data.x, data.edge_index)[mask])
+    pred = probs.argmax(dim=1)
+    y = data.y[mask].view(-1)
+    accuracy = (pred == y).float().mean().item()
+
+    return accuracy, probs
+
 
 
 @torch.no_grad()
@@ -268,6 +280,7 @@ def validate(model, x_val, y_val, bs, device):
     correct, total = 0, 0
     n_batches = int(np.ceil(len(x_val) / bs))
     probs_stack = list()
+    emb_stack = list()
 
     for batch_idx in range(n_batches):
         start_idx = batch_idx * bs
@@ -278,16 +291,17 @@ def validate(model, x_val, y_val, bs, device):
 
         if isinstance(model, SentimentLSTM):
             h = model.init_hidden(x.size(0))
-            logits, _ = model(x, h)
+            logits, _, inter_emb = model(x, h)
         else:
-            logits = model(x)
+            logits, inter_emb = model(x)
 
+        emb_stack.append(inter_emb.detach().cpu())
         probs = F.softmax(logits, dim=1)
         probs_stack.append(probs.detach().cpu())
         correct += (probs.argmax(dim=1) == y).sum().item()
         total += y.numel()
 
-    return (correct / total), torch.cat(probs_stack, dim=0)
+    return (correct / total), torch.cat(probs_stack, dim=0), torch.cat(emb_stack, dim=0)
 
 def recalibrate_bn(model, x_full, cfg):
     was_training = model.training

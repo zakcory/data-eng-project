@@ -55,6 +55,7 @@ def build_knn_graph(embeddings: torch.Tensor, k: int = 10, symmetrize: bool = Tr
         S = Xn[start:end] @ Xn.t()           # [c, N] cosine similarity
         S[:, start:end].fill_diagonal_(-1.0) # avoid self as top-1
         _, nn_idx = torch.topk(S, k=k, dim=1)
+
         rows = torch.arange(start, end).unsqueeze(1).expand(-1, k)
         src_all.append(rows.reshape(-1))
         dst_all.append(nn_idx.reshape(-1))

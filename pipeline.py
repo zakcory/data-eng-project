@@ -127,6 +127,28 @@ class ActiveLearningPipeline:
 
         return loss_steps, trained_model
 
+    def _gnn_sampling(self, trained_model):
+        embeddings = self._compute_embeddings(trained_model)
+        edge_index = self._build_graph_from_embeddings(embeddings)
+        print(edge_index.shape)
+        graph_data = self._as_pyg_data(embeddings, edge_index)
+        gnn_model = self._train_label_propagation_gnn(graph_data)
+
+        _, probs = validate_gnn(gnn_model, graph_data, graph_data.valid_mask)
+
+        del gnn_model
+        del graph_data
+        torch.cuda.empty_cache()
+        
+        sorted_probs, _ = torch.sort(probs, dim=1, descending=True)
+        margins = sorted_probs[:, 0] - sorted_probs[:, 1]
+        uncertainties = -margins.detach().cpu().numpy()  # Negative so high uncertainty = high value
+
+
+        budget_n = int(self.budget_per_iter * self.total_size)
+        selected_pos = np.argpartition(-uncertainties, budget_n)[:budget_n]
+        return selected_pos
+
     def _random_sampling(self):
         """
         Random samplings
@@ -139,11 +161,11 @@ class ActiveLearningPipeline:
         return self.rng.choice(len(self.available_pool_indices), budget_n, replace=False)
 
 
-    def _custom_sampling(self, trained_model):
+    def _uncertainty_sampling(self, trained_model):
         x_pool = self.feature_vectors[self.available_pool_indices]
         y_pool = self.labels[self.available_pool_indices]
         
-        _, probs = validate(trained_model, x_pool, y_pool, 
+        _, probs, _ = validate(trained_model, x_pool, y_pool, 
                         self.train_config.batch_size, 
                         self.train_config.device)
         
@@ -170,9 +192,11 @@ class ActiveLearningPipeline:
         new_selected: list, newly selected samples
         """
         if self.selection_criterion in ['least_confidence', 'entropy', 'margin']:
-            pos = self._custom_sampling(trained_model)
+            pos = self._uncertainty_sampling(trained_model)
         elif self.selection_criterion == 'random':
             pos = self._random_sampling()
+        elif self.selection_criterion == 'gnn':
+            pos = self._gnn_sampling(trained_model)
         else:
             raise ValueError("Unknown selection criterion")
         new_selected = np.array(self.available_pool_indices)[pos]
@@ -207,13 +231,23 @@ class ActiveLearningPipeline:
         if any(idx in self.train_indices for idx in self.test_indices):
             raise ValueError('Data leakage detected: test indices are in the train set.')
         
-        test_acc, _ = validate(trained_model, self.feature_vectors[self.test_indices], self.labels[self.test_indices],
+        test_acc, _, _ = validate(trained_model, self.feature_vectors[self.test_indices], self.labels[self.test_indices],
                          self.train_config.batch_size, self.train_config.device)
         return test_acc
     
+    def _compute_embeddings(self, trained_model: torch.nn.Module) -> torch.Tensor:
+        """
+        Compute embeddings for the entire dataset using the trained model.
+        """
+        device = self.train_config.device
+        model = trained_model.to(device)
+        _, _, embeddings = validate(model, self.feature_vectors, self.labels, self.train_config.batch_size, self.train_config.device)
+
+        return embeddings
+    
     def _build_graph_from_embeddings(self, embeddings: torch.Tensor, k: int = 10, symmetrize: bool = True):
         """
-        Build a k-NN graph (edge_index) from dense embeddings and
+        Build a k-NN graph (edge_index) from intermediate embeddings and
         optionally return a fully prepared PyG Data object with masks.
 
         Args:
@@ -239,12 +273,25 @@ class ActiveLearningPipeline:
 
         data = Data(x=x, edge_index=edge_index.to(device), y=y)
 
-        train_mask = torch.zeros(N, dtype=torch.bool, device=device); train_mask[self.train_indices] = True
-        val_mask   = torch.zeros(N, dtype=torch.bool, device=device);  val_mask[self.val_indices]   = True
-        test_mask  = torch.zeros(N, dtype=torch.bool, device=device);  test_mask[self.test_indices] = True
+        train_mask = torch.zeros(N, dtype=torch.bool, device=device)
+        train_mask[self.train_indices] = True
+
+        val_mask = torch.zeros(N, dtype=torch.bool, device=device)
+        val_mask[self.val_indices] = True
+
+        test_mask = torch.zeros(N, dtype=torch.bool, device=device)
+        test_mask[self.test_indices] = True
 
         data.train_mask, data.valid_mask, data.test_mask = train_mask, val_mask, test_mask
         return data
+    
+    def _train_label_propagation_gnn(self, pyg_data):
+        hidden_channels = pyg_data.x.size(1)
+        gnn = GraphSAGE(hidden_channels=hidden_channels, output_dim=self.n_classes, seed=self.seed)
+        gnn = gnn.to(self.train_config.device)
+
+        _, trained_gnn = train_gnn_model(gnn, pyg_data, self.train_config)
+        return trained_gnn
 
 
 
@@ -258,6 +305,7 @@ if __name__ == '__main__':
     parser.add_argument("--val_ratio", type=float, default=0.05)
     # training model configs
     parser.add_argument("--epochs", type=int, default=200)
+    parser.add_argument("--gnn_epochs", type=int, default=100)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--weight_decay", type=float, default=5e-4)
     parser.add_argument("--momentum", type=float, default=0.9)
@@ -284,14 +332,14 @@ if __name__ == '__main__':
     hp = parser.parse_args()
 
     # add training config into a configurator
-    train_config = TrainConfig(hp.epochs, hp.lr, hp.weight_decay, hp.momentum, hp.batch_size, hp.ckpt_dir, hp.log_every, hp.device, hp.model_name)
+    train_config = TrainConfig(hp.epochs, hp.gnn_epochs, hp.lr, hp.weight_decay, hp.momentum, hp.batch_size, hp.ckpt_dir, hp.log_every, hp.device, hp.model_name)
 
     # X, y (entire set)
     x, y, data_meta = load_dataset_wrapper(hp.dataset_name)
 
 
     # TODO: add more criterias here
-    selection_criteria = ['least_confidence', 'entropy', 'margin', 'random']
+    selection_criteria = ['gnn', 'least_confidence', 'entropy', 'margin', 'random']
     accuracy_scores_dict = defaultdict(list)
 
     model_config = None
