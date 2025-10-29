@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 import torch_geometric
 from torch_geometric.nn import SAGEConv
+from torch_geometric.loader import NeighborLoader
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
@@ -71,7 +72,7 @@ class GraphSAGE(torch.nn.Module):
         return x
 
 # training function for the GNN model
-def train_gnn_model(model, data, cfg, patience=10):
+def train_gnn_model(model, data, loader, cfg, patience=10):
 
     optimizer = torch.optim.Adam(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
     criterion = torch.nn.CrossEntropyLoss()
@@ -87,13 +88,15 @@ def train_gnn_model(model, data, cfg, patience=10):
         if patience_count > patience:
             print(f"Breaking early... (patience)")
             break
-
         model.train()
-        optimizer.zero_grad()
-        out = model(data.x, data.edge_index)
-        loss = criterion(out[data.train_mask], data.y[data.train_mask])
-        loss.backward()
-        optimizer.step()
+
+        for batch in loader:
+            batch = batch.to(cfg.device)
+            optimizer.zero_grad()
+            out = model(batch.x, batch.edge_index)
+            loss = criterion(out[batch.train_mask], batch.y[batch.train_mask])
+            loss.backward()
+            optimizer.step()
 
         val_acc, _ = validate_gnn(model, data, data.valid_mask)
 
@@ -155,9 +158,8 @@ class BeanNet(nn.Module):
 
 # TODO: make a tqdm here
 def train_deep_model(model, x_train, y_train, x_val, y_val, cfg, fine_tune, first_round, patience=40):
-    if torch.cuda.is_available():
-        model.cuda()
-
+    model = model.to(cfg.device)
+    print("Model on GPU")
     optimizer = torch.optim.Adam(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
     criterion = nn.CrossEntropyLoss()
     
@@ -265,12 +267,31 @@ class TrainConfig:
 @torch.no_grad()
 def validate_gnn(model, data, mask):
     model.eval()
-    probs = F.softmax(model(data.x, data.edge_index)[mask])
-    pred = probs.argmax(dim=1)
-    y = data.y[mask].view(-1)
-    accuracy = (pred == y).float().mean().item()
+    val_loader = NeighborLoader(
+        data,
+        input_nodes=mask,
+        num_neighbors=[-1],  # full neighborhood for val nodes
+        batch_size=1024,
+        shuffle=False
+    )
+    
+    all_probs, all_preds, all_labels = [], [], []
 
-    return accuracy, probs
+    for batch in val_loader:
+        batch = batch.to(next(model.parameters()).device)
+        out = model(batch.x, batch.edge_index)
+        probs = F.softmax(out, dim=1)
+        preds = probs.argmax(dim=1)
+        all_probs.append(probs.detach().cpu())
+        all_preds.append(preds.detach().cpu())
+        all_labels.append(batch.y.detach().cpu())
+
+    all_preds = torch.cat(all_preds)
+    all_labels = torch.cat(all_labels)
+    all_probs = torch.cat(all_probs)
+
+    acc = (all_preds == all_labels).float().mean().item()
+    return acc, all_probs
 
 
 

@@ -3,6 +3,7 @@ import numpy as np
 import torch
 import torch_geometric
 from torch_geometric.data import Data
+from torch_geometric.loader import NeighborLoader
 from collections import defaultdict
 import argparse
 from tqdm import tqdm
@@ -63,6 +64,7 @@ class ActiveLearningPipeline:
             print(f'Iteration {iteration + 1}/{self.iterations}, Train Size: {len(self.train_indices)}')
             _, trained_model = self._train_model()
             accuracy = self._evaluate_model(trained_model)
+
             bar.set_postfix({'Accuracy': accuracy*100})
             accuracy_scores.append(accuracy)
             print(f'Accuracy: {accuracy}')
@@ -119,6 +121,7 @@ class ActiveLearningPipeline:
                                 self.fine_tune,
                                 first_round
                             )
+    
         
         if self.fine_tune:
             self.current_model = trained_model
@@ -129,12 +132,21 @@ class ActiveLearningPipeline:
 
     def _gnn_sampling(self, trained_model):
         embeddings = self._compute_embeddings(trained_model)
+
+        # put the model back to CPU to fit the GNN to there
+        trained_model = trained_model.to('cpu')
+        print("Model back on CPU")
+
         edge_index = self._build_graph_from_embeddings(embeddings)
-        print(edge_index.shape)
         graph_data = self._as_pyg_data(embeddings, edge_index)
+
+        print("Finished building graph, Training GNN....")
+
         gnn_model = self._train_label_propagation_gnn(graph_data)
 
         _, probs = validate_gnn(gnn_model, graph_data, graph_data.valid_mask)
+
+        print("Model back on CPU")
 
         del gnn_model
         del graph_data
@@ -143,7 +155,6 @@ class ActiveLearningPipeline:
         sorted_probs, _ = torch.sort(probs, dim=1, descending=True)
         margins = sorted_probs[:, 0] - sorted_probs[:, 1]
         uncertainties = -margins.detach().cpu().numpy()  # Negative so high uncertainty = high value
-
 
         budget_n = int(self.budget_per_iter * self.total_size)
         selected_pos = np.argpartition(-uncertainties, budget_n)[:budget_n]
@@ -282,15 +293,20 @@ class ActiveLearningPipeline:
         test_mask = torch.zeros(N, dtype=torch.bool, device=device)
         test_mask[self.test_indices] = True
 
-        data.train_mask, data.valid_mask, data.test_mask = train_mask, val_mask, test_mask
+        pool_mask = torch.zeros(N, dtype=torch.bool, device=device)
+        pool_mask[self.pool_indices] = True
+
+        data.train_mask, data.valid_mask, data.test_mask, data.pool_mask = train_mask, val_mask, test_mask, pool_mask
         return data
     
     def _train_label_propagation_gnn(self, pyg_data):
         hidden_channels = pyg_data.x.size(1)
         gnn = GraphSAGE(hidden_channels=hidden_channels, output_dim=self.n_classes, seed=self.seed)
-        gnn = gnn.to(self.train_config.device)
 
-        _, trained_gnn = train_gnn_model(gnn, pyg_data, self.train_config)
+        gnn = gnn.to(self.train_config.device)
+        print("GNN on GPU")
+        gnn_loader = NeighborLoader(data=pyg_data, input_nodes=pyg_data.train_mask, batch_size=1024, num_neighbors=[15, 10], shuffle=True)
+        _, trained_gnn = train_gnn_model(gnn, pyg_data, gnn_loader, self.train_config)
         return trained_gnn
 
 
