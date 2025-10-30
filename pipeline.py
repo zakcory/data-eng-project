@@ -144,7 +144,7 @@ class ActiveLearningPipeline:
 
         gnn_model = self._train_label_propagation_gnn(graph_data)
 
-        _, probs = validate_gnn(gnn_model, graph_data, graph_data.valid_mask)
+        _, probs = validate_gnn(gnn_model, graph_data, graph_data.pool_mask)
 
         print("Model back on CPU")
 
@@ -294,7 +294,7 @@ class ActiveLearningPipeline:
         test_mask[self.test_indices] = True
 
         pool_mask = torch.zeros(N, dtype=torch.bool, device=device)
-        pool_mask[self.pool_indices] = True
+        pool_mask[self.available_pool_indices] = True
 
         data.train_mask, data.valid_mask, data.test_mask, data.pool_mask = train_mask, val_mask, test_mask, pool_mask
         return data

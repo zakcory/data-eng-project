@@ -210,6 +210,8 @@ def train_deep_model(model, x_train, y_train, x_val, y_val, cfg, fine_tune, firs
                     # detach hidden state
                     h = tuple(s.detach() for s in h)
 
+                    model.lstm.flatten_parameters()
+
                     y = y.long()
                     output, h, _ = model(x, h)
                 else:
@@ -280,11 +282,16 @@ def validate_gnn(model, data, mask):
     for batch in val_loader:
         batch = batch.to(next(model.parameters()).device)
         out = model(batch.x, batch.edge_index)
-        probs = F.softmax(out, dim=1)
+
+        # Get outputs/labels only for the "seed" nodes (from the mask)
+        out_seed = out[:batch.batch_size]
+        y_seed = batch.y[:batch.batch_size]
+
+        probs = F.softmax(out_seed, dim=1)  # Use out_seed
         preds = probs.argmax(dim=1)
         all_probs.append(probs.detach().cpu())
         all_preds.append(preds.detach().cpu())
-        all_labels.append(batch.y.detach().cpu())
+        all_labels.append(y_seed.detach().cpu())  # Use y_seed
 
     all_preds = torch.cat(all_preds)
     all_labels = torch.cat(all_labels)
