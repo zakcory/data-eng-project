@@ -144,20 +144,69 @@ class ActiveLearningPipeline:
 
         gnn_model = self._train_label_propagation_gnn(graph_data)
 
-        _, probs = validate_gnn(gnn_model, graph_data, graph_data.pool_mask)
+        # --- Get GNN probabilities for all nodes ---
+        # We need a mask that covers all nodes
+        all_nodes_mask = graph_data.train_mask | graph_data.valid_mask | graph_data.test_mask | graph_data.pool_mask
+        _, all_probs = validate_gnn(gnn_model, graph_data, all_nodes_mask)
+
+        # Get probabilities for just the POOL nodes (for sampling)
+        pool_probs = all_probs[graph_data.pool_mask]
 
         print("Model back on CPU")
 
-        del gnn_model
-        del graph_data
-        torch.cuda.empty_cache()
-        
-        sorted_probs, _ = torch.sort(probs, dim=1, descending=True)
+        # --- !! Create all_masks helper variable !! ---
+        # We create this once to use in both plots.
+        # 0=Pool, 1=Train, 2=Validation, 3=Test
+        all_masks = torch.zeros_like(self.labels, dtype=torch.int)  # Use torch.int
+        all_masks[self.train_indices] = 1
+        all_masks[self.val_indices] = 2
+        all_masks[self.test_indices] = 3
+        # All other nodes will remain 0 (Pool)
+
+        # Get the current iteration number
+        iter_num = len(self.train_indices) // int(self.budget_per_iter * self.total_size)
+
+        # --- 1. Call t-SNE Plot ---
+        # (This plot is optional, you can comment it out if it's too slow)
+        generate_tsne_plot(
+            embeddings=graph_data.x,
+            labels=graph_data.y,
+            masks=all_masks.cpu().numpy(),  # Pass the numpy version
+            gnn_probs=all_probs,
+            iteration=iter_num,
+            seed=self.seed,
+            dataset_name=self.dataset_name,
+            fine_tune=self.fine_tune
+        )
+
+        # --- Calculate Uncertainties for Sampling ---
+        del gnn_model  # Free up GNN model memory
+
+        sorted_probs, _ = torch.sort(pool_probs, dim=1, descending=True)
         margins = sorted_probs[:, 0] - sorted_probs[:, 1]
         uncertainties = -margins.detach().cpu().numpy()  # Negative so high uncertainty = high value
 
         budget_n = int(self.budget_per_iter * self.total_size)
         selected_pos = np.argpartition(-uncertainties, budget_n)[:budget_n]
+
+        # --- 2. Call Neighborhood Plot ---
+        # Map the local pool index (e.g., 10th item in the pool)
+        # back to the global node index (e.g., node #45032)
+        global_node_idx_to_plot = np.array(self.available_pool_indices)[selected_pos[0]]
+
+        plot_gnn_neighborhood(
+            graph_data=graph_data,
+            all_masks=all_masks.cpu().numpy(),  # Pass the numpy version
+            node_idx=global_node_idx_to_plot,
+            iteration=iter_num,
+            seed=self.seed,
+            dataset_name=self.dataset_name
+        )
+
+        # --- Cleanup ---
+        del graph_data
+        torch.cuda.empty_cache()
+
         return selected_pos
 
     def _random_sampling(self):
@@ -355,6 +404,7 @@ if __name__ == '__main__':
 
 
     # TODO: add more criterias here
+    #selection_criteria = ['margin', 'random']
     selection_criteria = ['gnn', 'least_confidence', 'entropy', 'margin', 'random']
     accuracy_scores_dict = defaultdict(list)
 
