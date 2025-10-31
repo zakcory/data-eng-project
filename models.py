@@ -72,9 +72,10 @@ class GraphSAGE(torch.nn.Module):
         return x
 
 # training function for the GNN model
-def train_gnn_model(model, data, loader, cfg, patience=10):
+def train_gnn_model(model, data, loader, cfg, patience=50):
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
+
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4, weight_decay=cfg.weight_decay)
     criterion = torch.nn.CrossEntropyLoss()
 
     loss_steps = list()

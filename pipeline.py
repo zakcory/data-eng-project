@@ -150,7 +150,7 @@ class ActiveLearningPipeline:
         _, all_probs = validate_gnn(gnn_model, graph_data, all_nodes_mask)
 
         # Get probabilities for just the POOL nodes (for sampling)
-        pool_probs = all_probs[graph_data.pool_mask]
+        pool_probs = all_probs[graph_data.pool_mask.cpu()]
 
         print("Model back on CPU")
 

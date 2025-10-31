@@ -48,8 +48,8 @@ def build_knn_graph(embeddings: torch.Tensor, k: int = 10, symmetrize: bool = Tr
     """
     X = embeddings
     if X.device.type != "cpu":
-        # optional: for large N you may want to move to CPU to save GPU mem
-        X = X.detach().cpu()
+         #optional: for large N you may want to move to CPU to save GPU mem
+         X = X.detach().cpu()
 
     N = X.size(0)
     # cosine normalization
@@ -229,8 +229,11 @@ def plot_gnn_neighborhood(graph_data, all_masks, node_idx, iteration, seed, data
     G.add_nodes_from(nodes_in_subgraph)
 
     # Add edges *only* between nodes in our subgraph
-    sub_edge_mask = (torch.isin(edge_index[0], nodes_in_subgraph) &
-                     torch.isin(edge_index[1], nodes_in_subgraph))
+    # Convert numpy array back to tensor on the same device as edge_index
+    nodes_tensor = torch.from_numpy(nodes_in_subgraph).to(edge_index.device)
+
+    sub_edge_mask = (torch.isin(edge_index[0], nodes_tensor) &
+                     torch.isin(edge_index[1], nodes_tensor))
     sub_edges = edge_index[:, sub_edge_mask].t().numpy()
     G.add_edges_from(sub_edges)
 
