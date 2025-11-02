@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 import torch
 import torch_geometric
+from sklearn.neighbors import NearestNeighbors
 from torch_geometric.data import Data
 from torch_geometric.loader import NeighborLoader
 from collections import defaultdict
@@ -131,81 +132,61 @@ class ActiveLearningPipeline:
         return loss_steps, trained_model
 
     def _gnn_sampling(self, trained_model):
+        # 1. Get Embeddings
         embeddings = self._compute_embeddings(trained_model)
+        embeddings_cpu = embeddings.detach().cpu().numpy()
 
-        # put the model back to CPU to fit the GNN to there
         trained_model = trained_model.to('cpu')
         print("Model back on CPU")
 
+        # 2. Get GNN Probabilities
         edge_index = self._build_graph_from_embeddings(embeddings)
         graph_data = self._as_pyg_data(embeddings, edge_index)
 
         print("Finished building graph, Training GNN....")
-
         gnn_model = self._train_label_propagation_gnn(graph_data)
 
-        # --- Get GNN probabilities for all nodes ---
-        # We need a mask that covers all nodes
         all_nodes_mask = graph_data.train_mask | graph_data.valid_mask | graph_data.test_mask | graph_data.pool_mask
         _, all_probs = validate_gnn(gnn_model, graph_data, all_nodes_mask)
-
-        # Get probabilities for just the POOL nodes (for sampling)
         pool_probs = all_probs[graph_data.pool_mask.cpu()]
-
+        del gnn_model, graph_data
+        torch.cuda.empty_cache()
         print("Model back on CPU")
 
-        # --- !! Create all_masks helper variable !! ---
-        # We create this once to use in both plots.
-        # 0=Pool, 1=Train, 2=Validation, 3=Test
-        all_masks = torch.zeros_like(self.labels, dtype=torch.int)  # Use torch.int
-        all_masks[self.train_indices] = 1
-        all_masks[self.val_indices] = 2
-        all_masks[self.test_indices] = 3
-        # All other nodes will remain 0 (Pool)
-
-        # Get the current iteration number
-        iter_num = len(self.train_indices) // int(self.budget_per_iter * self.total_size)
-
-        # --- 1. Call t-SNE Plot ---
-        # (This plot is optional, you can comment it out if it's too slow)
-        generate_tsne_plot(
-            embeddings=graph_data.x,
-            labels=graph_data.y,
-            masks=all_masks.cpu().numpy(),  # Pass the numpy version
-            gnn_probs=all_probs,
-            iteration=iter_num,
-            seed=self.seed,
-            dataset_name=self.dataset_name,
-            fine_tune=self.fine_tune
-        )
-
-        # --- Calculate Uncertainties for Sampling ---
-        del gnn_model  # Free up GNN model memory
-
+        # 3. Calculate UNCERTAINTY
         sorted_probs, _ = torch.sort(pool_probs, dim=1, descending=True)
-        margins = sorted_probs[:, 0] - sorted_probs[:, 1]
-        uncertainties = -margins.detach().cpu().numpy()  # Negative so high uncertainty = high value
+        margins = (sorted_probs[:, 0] - sorted_probs[:, 1]).detach().cpu().numpy()
+        # Normalize uncertainty score (0 to 1)
+        uncertainty_scores = 1.0 - margins
 
+        # 4. Calculate EXPLORATION
+        print("Calculating exploration distances...")
+        # Get embeddings for the pool and train sets
+        pool_embeddings = embeddings_cpu[self.available_pool_indices]
+        train_embeddings = embeddings_cpu[self.train_indices]
+
+        # Fit a k-NN model on the training embeddings
+        nn_model = NearestNeighbors(n_neighbors=1, algorithm='auto').fit(train_embeddings)
+
+        # Find the distance of each pool node to its nearest training node
+        distances, _ = nn_model.kneighbors(pool_embeddings)
+        exploration_scores = distances.flatten()  # This is min_dist_to_train
+
+        # Normalize exploration score (0 to 1)
+        if exploration_scores.max() > 0:
+            exploration_scores = exploration_scores / exploration_scores.max()
+        print("Distances calculated.")
+
+        # 5. Combine with ALPHA
+        alpha = 0.5  # Hyperparameter: 0.0 = all uncertainty, 1.0 = all exploration
+
+        # Ensure scores are numpy for combining
+        hybrid_scores = (1 - alpha) * uncertainty_scores + (alpha * exploration_scores)
+
+        # 6. Select top-k based on the new hybrid score
         budget_n = int(self.budget_per_iter * self.total_size)
-        selected_pos = np.argpartition(-uncertainties, budget_n)[:budget_n]
-
-        # --- 2. Call Neighborhood Plot ---
-        # Map the local pool index (e.g., 10th item in the pool)
-        # back to the global node index (e.g., node #45032)
-        global_node_idx_to_plot = np.array(self.available_pool_indices)[selected_pos[0]]
-
-        plot_gnn_neighborhood(
-            graph_data=graph_data,
-            all_masks=all_masks.cpu().numpy(),  # Pass the numpy version
-            node_idx=global_node_idx_to_plot,
-            iteration=iter_num,
-            seed=self.seed,
-            dataset_name=self.dataset_name
-        )
-
-        # --- Cleanup ---
-        del graph_data
-        torch.cuda.empty_cache()
+        # Use argpartition to find top-k highest scores (we want high uncertainty and high exploration)
+        selected_pos = np.argpartition(-hybrid_scores, budget_n)[:budget_n]
 
         return selected_pos
 
