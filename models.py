@@ -59,16 +59,18 @@ class SentimentLSTM(nn.Module):
 
 # GNN model (for active learning)
 class GraphSAGE(torch.nn.Module):
-    def __init__(self, hidden_channels, output_dim, seed):
+    def __init__(self, in_channels, hidden_channels, output_dim):
         super().__init__()
-        self.conv1 = SAGEConv(in_channels=hidden_channels, out_channels=hidden_channels)
+        self.conv1 = SAGEConv(in_channels=in_channels, out_channels=hidden_channels)
         self.conv2 = SAGEConv(in_channels=hidden_channels, out_channels=output_dim)
+        self.dropout = nn.Dropout(p=0.5)
 
     def forward(self, x, edge_index):
         x = self.conv1(x, edge_index)
         x = F.dropout(x, training=self.training)
         x = x.relu()
         x = self.conv2(x, edge_index)
+        x = self.dropout(x)
         return x
 
 # training function for the GNN model
@@ -110,7 +112,6 @@ def train_gnn_model(model, data, loader, cfg, patience=50):
             patience_count += 1
 
         if epoch % cfg.log_every == 0 or epoch == 1:
-            print("\n------------------Propagating labels with GNN----------------------------\n")
             print(f"Epoch: {epoch:03d}  "
                   f"Best Val Acc: {best_val_acc:.4f}  "
                   f"Best Loss: {best_loss:.4f}  "

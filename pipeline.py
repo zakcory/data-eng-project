@@ -1,8 +1,7 @@
 import pandas as pd
 import numpy as np
 import torch
-import torch_geometric
-from sklearn.neighbors import NearestNeighbors
+from scipy.spatial.distance import cdist
 from torch_geometric.data import Data
 from torch_geometric.loader import NeighborLoader
 from collections import defaultdict
@@ -51,6 +50,7 @@ class ActiveLearningPipeline:
         self.load_from_pkl = load_from_pkl
         self.fine_tune = fine_tune
         self.current_model = None
+        self.current_iter_ratio = 0
 
     def run_pipeline(self):
         """
@@ -71,6 +71,7 @@ class ActiveLearningPipeline:
             print(f'Accuracy: {accuracy}')
             print('----------------------------------------')
             self._update_step(trained_model)
+            self.current_iter_ratio += (iteration + 1) / self.iterations
 
             if not self.fine_tune:
                 del trained_model
@@ -160,28 +161,24 @@ class ActiveLearningPipeline:
         uncertainty_scores = 1.0 - margins
 
         # 4. Calculate EXPLORATION
-        print("Calculating exploration distances...")
-        # Get embeddings for the pool and train sets
         pool_embeddings = embeddings_cpu[self.available_pool_indices]
         train_embeddings = embeddings_cpu[self.train_indices]
+        dists = cdist(pool_embeddings, train_embeddings, metric='euclidean')
 
-        # Fit a k-NN model on the training embeddings
-        nn_model = NearestNeighbors(n_neighbors=1, algorithm='auto').fit(train_embeddings)
+        # For each pool sample, find its distance to the nearest training point
+        min_dists = np.min(dists, axis=1)
+        exploration_scores = min_dists  # The farther = more unexplored region
 
-        # Find the distance of each pool node to its nearest training node
-        distances, _ = nn_model.kneighbors(pool_embeddings)
-        exploration_scores = distances.flatten()  # This is min_dist_to_train
-
-        # Normalize exploration score (0 to 1)
+        # Normalize exploration scores (0 to 1)
         if exploration_scores.max() > 0:
             exploration_scores = exploration_scores / exploration_scores.max()
-        print("Distances calculated.")
+        print("Exploration scores calculated.")
 
         # 5. Combine with ALPHA
-        alpha = 0.5  # Hyperparameter: 0.0 = all uncertainty, 1.0 = all exploration
+        alpha = self.current_iter_ratio
 
         # Ensure scores are numpy for combining
-        hybrid_scores = (1 - alpha) * uncertainty_scores + (alpha * exploration_scores)
+        hybrid_scores = uncertainty_scores
 
         # 6. Select top-k based on the new hybrid score
         budget_n = int(self.budget_per_iter * self.total_size)
@@ -330,8 +327,9 @@ class ActiveLearningPipeline:
         return data
     
     def _train_label_propagation_gnn(self, pyg_data):
-        hidden_channels = pyg_data.x.size(1)
-        gnn = GraphSAGE(hidden_channels=hidden_channels, output_dim=self.n_classes, seed=self.seed)
+        in_channels = pyg_data.x.shape[1]
+        hidden_channels = 1024
+        gnn = GraphSAGE(in_channels=in_channels, hidden_channels=hidden_channels, output_dim=self.n_classes)
 
         gnn = gnn.to(self.train_config.device)
         print("GNN on GPU")
@@ -351,7 +349,7 @@ if __name__ == '__main__':
     parser.add_argument("--val_ratio", type=float, default=0.05)
     # training model configs
     parser.add_argument("--epochs", type=int, default=200)
-    parser.add_argument("--gnn_epochs", type=int, default=100)
+    parser.add_argument("--gnn_epochs", type=int, default=500)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--weight_decay", type=float, default=5e-4)
     parser.add_argument("--momentum", type=float, default=0.9)
