@@ -271,17 +271,17 @@ class TrainConfig:
 @torch.no_grad()
 def validate_gnn(model, data, mask):
     model.eval()
-    val_loader = NeighborLoader(
+    loader = NeighborLoader(
         data,
         input_nodes=mask,
         num_neighbors=[-1],  # full neighborhood for val nodes
-        batch_size=1024,
+        batch_size=256,
         shuffle=False
     )
     
     all_probs, all_preds, all_labels = [], [], []
 
-    for batch in val_loader:
+    for batch in loader:
         batch = batch.to(next(model.parameters()).device)
         out = model(batch.x, batch.edge_index)
 

@@ -31,6 +31,7 @@ class ActiveLearningPipeline:
                  fine_tune=False
                  ):
         self.seed = seed
+        self.iter = 0
         self.rng = np.random.default_rng(self.seed)
         self.feature_vectors = feature_vectors
         self.labels = labels
@@ -59,6 +60,7 @@ class ActiveLearningPipeline:
         accuracy_scores = []
         bar = tqdm(range(self.iterations), desc='AL Iters')
         for iteration in bar:
+            self.iter = iteration
             if len(self.train_indices) / self.total_size > 0.5:
                 # raise error if the train set is larger than half the samples
                 raise ValueError('The train set is larger than half the samples')
@@ -145,12 +147,14 @@ class ActiveLearningPipeline:
         graph_data = self._as_pyg_data(embeddings, edge_index)
 
         print("Finished building graph, Training GNN....")
-        gnn_model = self._train_label_propagation_gnn(graph_data)
 
         all_nodes_mask = graph_data.train_mask | graph_data.valid_mask | graph_data.test_mask | graph_data.pool_mask
+
+        gnn_model = self._train_label_propagation_gnn(graph_data)
+
         _, all_probs = validate_gnn(gnn_model, graph_data, all_nodes_mask)
         pool_probs = all_probs[graph_data.pool_mask.cpu()]
-        del gnn_model, graph_data
+        del gnn_model
         torch.cuda.empty_cache()
         print("Model back on CPU")
 
@@ -185,7 +189,31 @@ class ActiveLearningPipeline:
         # Use argpartition to find top-k highest scores (we want high uncertainty and high exploration)
         selected_pos = np.argpartition(-hybrid_scores, budget_n)[:budget_n]
 
+        # convert local pool positions -> global node indices
+        pool_global_indices = np.where(graph_data.pool_mask.cpu().numpy())[0]
+        selected_global = pool_global_indices[selected_pos]
+
+        if (self.iter == 0) or ((self.iter + 1) % 5 == 0):
+            # pick a 10th (practically random node those we picked for the training)
+            g_idx = selected_global[10] 
+            all_masks = self._build_set_inclusion_mask(graph_data)
+            plot_gnn_neighborhood(
+                graph_data=graph_data,  
+                all_masks=all_masks,
+                node_idx=g_idx,  
+                iteration=self.iter,
+                seed=self.seed,
+                dataset_name=self.dataset_name
+            )
+
         return selected_pos
+    
+    def _build_set_inclusion_mask(self, graph_data):
+        all_masks = np.zeros(self.total_size, dtype=int)
+        all_masks[graph_data.train_mask.cpu().numpy()] = 1
+        all_masks[graph_data.valid_mask.cpu().numpy()] = 2
+        all_masks[graph_data.test_mask.cpu().numpy()]  = 3
+        return all_masks
 
     def _random_sampling(self):
         """
@@ -333,7 +361,7 @@ class ActiveLearningPipeline:
 
         gnn = gnn.to(self.train_config.device)
         print("GNN on GPU")
-        gnn_loader = NeighborLoader(data=pyg_data, input_nodes=pyg_data.train_mask, batch_size=1024, num_neighbors=[15, 10], shuffle=True)
+        gnn_loader = NeighborLoader(data=pyg_data, input_nodes=pyg_data.train_mask, batch_size=256, num_neighbors=[15, 10], shuffle=True)
         _, trained_gnn = train_gnn_model(gnn, pyg_data, gnn_loader, self.train_config)
         return trained_gnn
 
@@ -353,7 +381,7 @@ if __name__ == '__main__':
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--weight_decay", type=float, default=5e-4)
     parser.add_argument("--momentum", type=float, default=0.9)
-    parser.add_argument("--batch_size", type=int, default=128)
+    parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--ckpt_dir", type=str, default="./ckpts")
     parser.add_argument("--log_every", type=int, default=25)
     # model and dataset name and path
@@ -402,7 +430,7 @@ if __name__ == '__main__':
     print(f"\n----------- STARTING ACTIVE LEARNING PIPELINE FOR DATASET {hp.dataset_name} WITH MODEL {hp.model_name}, FINETUNING (?) -> {hp.fine_tune} -------------------\n")
 
 
-    for i, seed in enumerate(range(1, 4)):
+    for i, seed in enumerate(range(3, 4)):
         print(f"---- SEED {seed} ----")
 
         if not hp.load_from_pkl:

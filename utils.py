@@ -80,83 +80,80 @@ def build_knn_graph(embeddings: torch.Tensor, k: int = 10, symmetrize: bool = Tr
     mask = edge_index[0] != edge_index[1]
     return edge_index[:, mask]
 
-
-def plot_gnn_neighborhood(graph_data, all_masks, node_idx, iteration, seed, dataset_name):
+def plot_gnn_neighborhood(
+    graph_data,
+    all_masks,
+    node_idx,
+    iteration,
+    seed,
+    dataset_name
+):
     """
-    Plots the 1-hop neighborhood of a specific node.
-    'all_masks' is expected to be a numpy array where 0=Pool, 1=Train, 2=Val, 3=Test
+    Plots the 2-hop neighborhood of a specific node.
     """
-    print(f"Plotting neighborhood for node {node_idx}...")
+    print(f"Plotting 2-hop neighborhood for node {node_idx}...")
 
-    # --- 1. Find 1-hop neighborhood ---
+    # --- 1. Find 2-hop neighborhood ---
     edge_index = graph_data.edge_index.cpu()
-    node_idx = int(node_idx)  # Ensure it's a standard int
+    node_idx = int(node_idx)
 
-    # Find all edges connected to the target node
+    # Get direct neighbors (1-hop)
     mask_to = (edge_index[0] == node_idx)
     mask_from = (edge_index[1] == node_idx)
+    neighbors_1 = torch.cat([edge_index[1, mask_to], edge_index[0, mask_from]]).unique()
 
-    neighbors_to = edge_index[1, mask_to]
-    neighbors_from = edge_index[0, mask_from]
+    # Get 2-hop neighbors (neighbors of neighbors)
+    mask_to_2 = torch.isin(edge_index[0], neighbors_1)
+    mask_from_2 = torch.isin(edge_index[1], neighbors_1)
+    neighbors_2 = torch.cat([edge_index[1, mask_to_2], edge_index[0, mask_from_2]]).unique()
 
-    all_neighbors = torch.cat([neighbors_to, neighbors_from]).unique()
-
-    # Add the central node itself
+    # Combine all nodes (central + 1-hop + 2-hop)
+    all_neighbors = torch.cat([neighbors_1, neighbors_2]).unique()
     nodes_in_subgraph = torch.cat([torch.tensor([node_idx]), all_neighbors]).numpy().astype(int)
 
-    # Create a NetworkX graph
+    # --- 2. Build NetworkX subgraph ---
     G = nx.Graph()
     G.add_nodes_from(nodes_in_subgraph)
 
-    # Add edges *only* between nodes in our subgraph
-    # Convert numpy array back to tensor on the same device as edge_index
     nodes_tensor = torch.from_numpy(nodes_in_subgraph).to(edge_index.device)
-
     sub_edge_mask = (torch.isin(edge_index[0], nodes_tensor) &
                      torch.isin(edge_index[1], nodes_tensor))
     sub_edges = edge_index[:, sub_edge_mask].t().numpy()
     G.add_edges_from(sub_edges)
 
-    # --- 2. Prepare labels and colors ---
-
-    # 0=Pool, 1=Train, 2=Validation, 3=Test
-    mask_map = {0: 'lightgray', 1: 'blue', 2: 'orange', 3: 'red'}
+    # --- 3. Prepare colors and numeric labels ---
+    mask_map   = {0: 'lightgray', 1: 'blue', 2: 'orange', 3: 'red'}
     mask_names = {0: 'Pool', 1: 'Train', 2: 'Val', 3: 'Test'}
 
-    # Get true labels (0=Neg, 1=Pos)
+    # Use numeric labels directly from graph_data.y
     labels = graph_data.y.cpu().numpy()
-    label_map = {n: f"{'Pos' if labels[n] == 1 else 'Neg'} ({mask_names.get(all_masks[n], 'Unknown')})" for n in
-                 nodes_in_subgraph}
+    label_map = {n: int(labels[n]) for n in nodes_in_subgraph}
 
-    # Assign colors based on mask
-    color_map = []
-    for node in G:
-        if node == node_idx:
-            color_map.append('lime')  # Highlight the central node
-        else:
-            color_map.append(mask_map.get(all_masks[node], 'black'))
+    # Color by mask, highlight central node
+    color_map = ['lime' if n == node_idx else mask_map.get(all_masks[n], 'black') for n in G.nodes()]
 
-    # --- 3. Draw the graph ---
+    # --- 4. Draw the graph ---
     plt.figure(figsize=(15, 10))
-    # Use a layout that spreads nodes out
-    pos = nx.spring_layout(G, k=1.0 / np.sqrt(len(G.nodes())), iterations=50, seed=seed)
+    pos = nx.spring_layout(G, k=1.0 / np.sqrt(max(len(G.nodes()), 1)), iterations=50, seed=seed)
 
     nx.draw_networkx_nodes(G, pos, node_color=color_map, node_size=400, alpha=0.9)
     nx.draw_networkx_edges(G, pos, alpha=0.3, width=0.5)
     nx.draw_networkx_labels(G, pos, labels=label_map, font_size=8)
 
-    plt.title(f"GNN Neighborhood of Node {node_idx} (Iter {iteration}, Seed {seed}, {dataset_name})")
-    plt.axis('off')  # Hide axes
+    plt.title(f"2-Hop Neighborhood of Node {node_idx} (Iter {iteration}, Seed {seed}, {dataset_name})")
+    plt.axis('off')
 
-    # Create legend
-    handles = [plt.Line2D([0], [0], marker='o', color='w', label=label,
-                          markerfacecolor=color, markersize=10)
-               for label, color in
-               [('Selected', 'lime'), ('Train', 'blue'), ('Pool', 'lightgray'), ('Val', 'orange'), ('Test', 'red')]]
+    handles = [
+        plt.Line2D([0], [0], marker='o', color='w', label='Selected', markerfacecolor='lime', markersize=10),
+        plt.Line2D([0], [0], marker='o', color='w', label='Train', markerfacecolor='blue', markersize=10),
+        plt.Line2D([0], [0], marker='o', color='w', label='Pool', markerfacecolor='lightgray', markersize=10),
+        plt.Line2D([0], [0], marker='o', color='w', label='Val', markerfacecolor='orange', markersize=10),
+        plt.Line2D([0], [0], marker='o', color='w', label='Test', markerfacecolor='red', markersize=10),
+    ]
     plt.legend(handles=handles, title="Node Type", loc='best')
 
-    plot_dir = 'plots'
-    os.makedirs(plot_dir, exist_ok=True)
-    plt.savefig(f'{plot_dir}/neighborhood_node={node_idx}_iter={iteration}_seed={seed}.png')
+    os.makedirs('plots', exist_ok=True)
+    out_path = f'plots/neighbors/neighborhood2hop_node={node_idx}_iter={iteration}_seed={seed}.png'
+    plt.savefig(out_path, bbox_inches='tight', dpi=150)
     plt.close()
-    print(f"Neighborhood plot saved to 'plots/'.")
+    print(f"2-hop neighborhood plot saved to '{out_path}'.")
