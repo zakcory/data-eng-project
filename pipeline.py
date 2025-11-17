@@ -36,14 +36,17 @@ class ActiveLearningPipeline:
         self.feature_vectors = feature_vectors
         self.labels = labels
         self.iterations = iterations
-        self.total_size = len(self.labels)
-        self.budget_per_iter = budget_per_iter
         self.train_config = train_config
         self.selection_criterion = selection_criterion
         self.dataset_name = dataset_name
         self.model_name = model_name
+
+        # set sizes
+        self.total_size = len(self.labels)
+        self.budget_per_iter = budget_per_iter
         self.test_ratio = test_ratio
         self.val_ratio = val_ratio
+
         self.n_classes = len(self.labels.unique())
         print(f"Num. Classes: {self.n_classes}")
         self.model_config = model_config
@@ -52,6 +55,12 @@ class ActiveLearningPipeline:
         self.fine_tune = fine_tune
         self.current_model = None
         self.current_iter_ratio = 0
+
+        # homophily measures
+        self.nf = list()
+        self.ef = list()
+        self.uncert_margin = list()
+        self.uncert_gnn = list()
 
     def run_pipeline(self):
         """
@@ -134,86 +143,55 @@ class ActiveLearningPipeline:
 
         return loss_steps, trained_model
 
-    def _gnn_sampling(self, trained_model):
-        # 1. Get Embeddings
-        embeddings = self._compute_embeddings(trained_model)
-        embeddings_cpu = embeddings.detach().cpu().numpy()
+    def _gnn_sampling(self, trained_model, graph_data):
 
         trained_model = trained_model.to('cpu')
         print("Model back on CPU")
 
-        # 2. Get GNN Probabilities
-        edge_index = self._build_graph_from_embeddings(embeddings)
-        graph_data = self._as_pyg_data(embeddings, edge_index)
-
-        print("Finished building graph, Training GNN....")
-
-        all_nodes_mask = graph_data.train_mask | graph_data.valid_mask | graph_data.test_mask | graph_data.pool_mask
-
         gnn_model = self._train_label_propagation_gnn(graph_data)
 
+        all_nodes_mask = graph_data.train_mask | graph_data.valid_mask | graph_data.test_mask | graph_data.pool_mask
         _, all_probs = validate_gnn(gnn_model, graph_data, all_nodes_mask)
         pool_probs = all_probs[graph_data.pool_mask.cpu()]
+
+        # cleaning up memory
         del gnn_model
         torch.cuda.empty_cache()
         print("Model back on CPU")
 
-        # 3. Calculate UNCERTAINTY
+        # calculating and normalizing uncertainty scores
         sorted_probs, _ = torch.sort(pool_probs, dim=1, descending=True)
         margins = (sorted_probs[:, 0] - sorted_probs[:, 1]).detach().cpu().numpy()
-        # Normalize uncertainty score (0 to 1)
-        uncertainty_scores = 1.0 - margins
+        uncertainty_scores = -margins
+        self.uncert_gnn.append(uncertainty_scores.copy())
 
-        # 4. Calculate EXPLORATION
-        pool_embeddings = embeddings_cpu[self.available_pool_indices]
-        train_embeddings = embeddings_cpu[self.train_indices]
-        dists = cdist(pool_embeddings, train_embeddings, metric='euclidean')
-
-        # For each pool sample, find its distance to the nearest training point
-        min_dists = np.min(dists, axis=1)
-        exploration_scores = min_dists  # The farther = more unexplored region
-
-        # Normalize exploration scores (0 to 1)
-        if exploration_scores.max() > 0:
-            exploration_scores = exploration_scores / exploration_scores.max()
-        print("Exploration scores calculated.")
-
-        # 5. Combine with ALPHA
-        alpha = self.current_iter_ratio
-
-        # Ensure scores are numpy for combining
-        hybrid_scores = uncertainty_scores
-
-        # 6. Select top-k based on the new hybrid score
+        # select top k based on uncertainty GNN score
         budget_n = int(self.budget_per_iter * self.total_size)
-        # Use argpartition to find top-k highest scores (we want high uncertainty and high exploration)
-        selected_pos = np.argpartition(-hybrid_scores, budget_n)[:budget_n]
+        selected_pos = np.argpartition(-uncertainty_scores, budget_n)[:budget_n]
 
         # convert local pool positions -> global node indices
         pool_global_indices = np.where(graph_data.pool_mask.cpu().numpy())[0]
         selected_global = pool_global_indices[selected_pos]
 
-        if (self.iter == 0) or ((self.iter + 1) % 5 == 0):
-            # pick a 10th (practically random node those we picked for the training)
-            g_idx = selected_global[10] 
-            all_masks = self._build_set_inclusion_mask(graph_data)
-            plot_gnn_neighborhood(
-                graph_data=graph_data,  
-                all_masks=all_masks,
-                node_idx=g_idx,  
-                iteration=self.iter,
-                seed=self.seed,
-                dataset_name=self.dataset_name
-            )
+        # uncomment the code below to plot the neighborhoods
+
+        # if (self.iter == 0) or ((self.iter + 1) % 5 == 0):
+        #     # pick a 10th (practically random node those we picked for the training)
+        #     g_idx = selected_global[10] 
+        #     all_masks = self.build_set_inclusion_mask(graph_data)
+        #     get_gnn_neighborhood(
+        #         graph_data=graph_data,  
+        #         all_masks=all_masks,
+        #         node_idx=g_idx,  
+        #         iteration=self.iter,
+        #         seed=self.seed,
+        #         dataset_name=self.dataset_name
+        #     )
+
+        
 
         return selected_pos
     
-    def _build_set_inclusion_mask(self, graph_data):
-        all_masks = np.zeros(self.total_size, dtype=int)
-        all_masks[graph_data.train_mask.cpu().numpy()] = 1
-        all_masks[graph_data.valid_mask.cpu().numpy()] = 2
-        all_masks[graph_data.test_mask.cpu().numpy()]  = 3
-        return all_masks
 
     def _random_sampling(self):
         """
@@ -221,9 +199,7 @@ class ActiveLearningPipeline:
         :return:
         new_selected_samples: numpy array, new selected samples
         """
-        # Calculate the integer number of samples to select
         budget_n = int(self.budget_per_iter * self.total_size)
-        # Use the integer budget_n for the size argument
         return self.rng.choice(len(self.available_pool_indices), budget_n, replace=False)
 
 
@@ -244,9 +220,12 @@ class ActiveLearningPipeline:
         elif self.selection_criterion == 'margin':
             sorted_probs, _ = torch.sort(probs, dim=1, descending=True)
             margins = sorted_probs[:, 0] - sorted_probs[:, 1]
-            uncertainties = -margins.numpy()  # Negative so high uncertainty = high value
+            uncertainties = -margins.numpy()
+
+            # store
+            self.uncert_margin.append(uncertainties.copy())  
     
-        # Select top-k most uncertain
+        # select top k most uncertain
         budget_n = int(self.budget_per_iter * self.total_size)
         selected_pos = np.argpartition(-uncertainties, budget_n)[:budget_n]
         return selected_pos
@@ -257,12 +236,32 @@ class ActiveLearningPipeline:
         :return:
         new_selected: list, newly selected samples
         """
+
+        embeddings = self._compute_embeddings(trained_model)
+        edge_index = self._build_graph_from_embeddings(embeddings)
+        graph_data = self._as_pyg_data(embeddings, edge_index)
+
+        if self.selection_criterion in ['gnn', 'margin']:
+            self.nf.append(node_homophily(edge_index, self.labels))
+            self.ef.append(edge_homophily(edge_index, self.labels))
+
+            if self.iter == 0 or ((self.iter + 1) % 5 == 0):
+                plot_tsne_embeddings(
+                                    embeddings,
+                                    self.labels,
+                                    self.train_indices,
+                                    self.iter+1,
+                                    self.dataset_name,
+                                    self.selection_criterion,
+                                    self.seed
+                                    )
+
         if self.selection_criterion in ['least_confidence', 'entropy', 'margin']:
             pos = self._uncertainty_sampling(trained_model)
         elif self.selection_criterion == 'random':
             pos = self._random_sampling()
         elif self.selection_criterion == 'gnn':
-            pos = self._gnn_sampling(trained_model)
+            pos = self._gnn_sampling(trained_model, graph_data)
         else:
             raise ValueError("Unknown selection criterion")
         new_selected = np.array(self.available_pool_indices)[pos]
@@ -285,6 +284,7 @@ class ActiveLearningPipeline:
         Update the pool and train indices
         """
         new_selected_samples = self._sampling(trained_model)
+        
         self._update_available_pool_indices(new_selected_samples)
         self._update_train_indices(new_selected_samples)
 
@@ -430,10 +430,18 @@ if __name__ == '__main__':
     print(f"\n----------- STARTING ACTIVE LEARNING PIPELINE FOR DATASET {hp.dataset_name} WITH MODEL {hp.model_name}, FINETUNING (?) -> {hp.fine_tune} -------------------\n")
 
 
-    for i, seed in enumerate(range(3, 4)):
+    for i, seed in enumerate(range(1, 4)):
         print(f"---- SEED {seed} ----")
 
         if not hp.load_from_pkl:
+
+            margin_node_hom = None
+            margin_edge_hom = None
+            gnn_node_hom = None
+            gnn_edge_hom = None
+            margin_uncert = None
+            gnn_uncert = None
+
             for criterion in selection_criteria:
                 print(f"----  Criterion: {criterion} ----")
 
@@ -457,8 +465,34 @@ if __name__ == '__main__':
                 
                 accuracy_scores_dict[criterion] = AL_class.run_pipeline()
 
+                # store homophily for margin / gnn
+                if criterion == 'margin' and len(AL_class.ef) > 0:
+                    margin_edge_hom = AL_class.ef
+                    margin_node_hom = AL_class.nf
+                    margin_uncert = AL_class.uncert_margin
+
+                if criterion == 'gnn' and len(AL_class.ef) > 0:
+                    gnn_edge_hom = AL_class.ef
+                    gnn_node_hom = AL_class.nf
+                    gnn_uncert = AL_class.uncert_gnn
+
             with open(f'saved_accs/accuracies_seed={seed}_dataset={hp.dataset_name}_finetune={hp.fine_tune}.pkl', 'wb') as f:
-                    pickle.dump(accuracy_scores_dict, f)  
+                    pickle.dump(accuracy_scores_dict, f)
+
+
+            # after all criteria for this seed, a lot of plots...
+            if (
+                margin_edge_hom is not None and
+                gnn_edge_hom is not None and
+                margin_node_hom is not None and
+                gnn_node_hom is not None
+            ):
+                plot_homophily(margin_edge_hom, gnn_edge_hom, margin_node_hom, gnn_node_hom, 
+                               hp.dataset_name, seed=seed)  
+                
+            if margin_uncert is not None and gnn_uncert is not None:
+                plot_uncertainty_side_by_side(margin_uncert, gnn_uncert, 
+                                              hp.dataset_name, seed)
 
         else:
             with open(f'saved_accs/accuracies_seed={seed}_dataset={hp.dataset_name}_finetune={hp.fine_tune}.pkl', 'rb') as f:
