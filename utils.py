@@ -182,16 +182,23 @@ def plot_tsne_embeddings(embeddings, labels, train_indices, iteration, dataset_n
     )
     emb_2d = tsne.fit_transform(emb_np)
     plt.figure(figsize=(8, 6))
+    cmap = plt.get_cmap('tab10')
+    unique_labels = np.unique(labels_np)
 
-    # scatter by label
-    plt.scatter(
-        emb_2d[~train_mask, 0],
-        emb_2d[~train_mask, 1],
-        c=labels_np[~train_mask],
-        cmap='tab10',
-        alpha=0.6,
-        s=10,
-    )
+    # scatter non-training points by label with legend
+    for i, lbl in enumerate(unique_labels):
+        mask = (labels_np == lbl) & (~train_mask)
+        if not np.any(mask):
+            continue
+        color = cmap(i % cmap.N)
+        plt.scatter(
+            emb_2d[mask, 0],
+            emb_2d[mask, 1],
+            c=[color],
+            s=10,
+            alpha=0.6,
+            label=f"Class {lbl}"
+        )
 
     # highlight training nodes
     plt.scatter(
