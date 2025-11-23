@@ -1,84 +1,132 @@
-import os
+"""
+Utility functions for GNN-based Active Learning pipeline.
+Provides plotting, seeding, graph construction, and analysis utilities.
+"""
 
+import os
 import matplotlib.pyplot as plt
 import pandas as pd
 import torch
 import numpy as np
-
 import networkx as nx
 from sklearn.manifold import TSNE
 
 
-# (Make sure os, np, torch, and matplotlib.pyplot as plt are also imported in utils.py)
-
 def generate_plot(accuracy_scores_dict, seed, dataset_name):
+    """
+    Generate and save accuracy plot for active learning experiments.
+    
+    Args:
+        accuracy_scores_dict: Dict mapping strategy names to accuracy lists
+        seed: Random seed used for the experiment
+        dataset_name: Name of the dataset for plot title
+    """
     num_iters = len(accuracy_scores_dict['random'])
+
+    # Plot each strategy's accuracy curve
     for criterion, accuracy_scores in accuracy_scores_dict.items():
         x_vals = list(range(1, len(accuracy_scores) + 1))
         plt.plot(x_vals, accuracy_scores, label=criterion)
+    
+    # Configure plot appearance
     plt.xlabel('Iterations')
     plt.ylabel('Accuracy')
     plt.xlim(1, num_iters)
     plt.xticks(range(1, num_iters + 1))
     plt.legend()
     plt.title(f'AL - Accuracy vs. Iterations, Seed: {seed}, Dataset: {dataset_name}, FT')
+
+    # Save and close figure
     plt.savefig(f'plot_{seed}_{dataset_name}_FT')
     plt.close()
 
+
 def seed_all(seed):
+    """
+    Set random seeds for reproducibility across all libraries.
+    
+    Args:
+        seed: Integer seed value
+    """
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-    torch.use_deterministic_algorithms(True)
+
+    # Disable cudnn benchmark for deterministic behavior (trades speed for reproducibility)
+    # torch.backends.cudnn.deterministic = True  # Forces deterministic algorithms (slower but fully reproducible)
+    torch.backends.cudnn.benchmark = False  # Disables auto-tuning (more reproducible, slightly slower)
+    # torch.use_deterministic_algorithms(True)  # Strictest setting - may error on non-deterministic ops
 
 
-def build_knn_graph(embeddings, k=10, symmetrize=True) -> torch.LongTensor:
+def build_knn_graph(embeddings: torch.Tensor, k: int = 10, symmetrize: bool = True) -> torch.LongTensor:
     """
-    Build a k-NN graph from embeddings.
-    By default, makes the graph undirected (symmetrize=True)
+    Build a k-NN graph from embeddings using cosine similarity.
+
+    Args:
+        embeddings: torch.Tensor [N, D] (CPU or GPU). If on GPU, ensure enough memory.
+        k: number of neighbors per node.
+        symmetrize: If True, make graph undirected by adding reverse edges
 
     Returns:
         edge_index: LongTensor [2, E] suitable for PyG.
     """
+
     X = embeddings
     if X.device.type != "cpu":
-         #optional: for large N you may want to move to CPU to save GPU mem
-         X = X.detach().cpu()
+        # optional: for large N you may want to move to CPU to save GPU mem
+        X = X.detach().cpu()
 
     N = X.size(0)
-    # cosine normalization
+    # L2-normalize for cosine similarity
     Xn = X / (X.norm(dim=1, keepdim=True) + 1e-12)
 
-    chunk = 2048  # adjust for memory
+    # Process in chunks to handle large graphs
+    chunk = 2048  # Adjust based on available memory
     src_all, dst_all = [], []
 
     for start in range(0, N, chunk):
         end = min(start + chunk, N)
+
+        # Compute cosine similarity matrix for chunk
         S = Xn[start:end] @ Xn.t()           # [c, N] cosine similarity
-        S[:, start:end].fill_diagonal_(-1.0) # avoid self as top-1
+        S[:, start:end].fill_diagonal_(-1.0) # Exclude self-connections as top-1
+
+        # Find k nearest neighbors
         _, nn_idx = torch.topk(S, k=k, dim=1)
 
+       # Build edge lists
         rows = torch.arange(start, end).unsqueeze(1).expand(-1, k)
         src_all.append(rows.reshape(-1))
         dst_all.append(nn_idx.reshape(-1))
 
+    # Concatenate all chunks
     src = torch.cat(src_all).long()
     dst = torch.cat(dst_all).long()
 
+    # Make graph undirected if requested
     if symmetrize:
         src = torch.cat([src, dst], dim=0)
         dst = torch.cat([dst, src[:len(dst)]], dim=0)
 
+    # Stack into edge_index format
     edge_index = torch.stack([src, dst], dim=0)
+
     # remove any accidental self-loops
     mask = edge_index[0] != edge_index[1]
     return edge_index[:, mask]
 
+
 def plot_gnn_neighborhood(graph_data, all_masks, node_idx, iteration, seed, dataset_name):
     """
-    Plots the 2-hop neighborhood of a specific node.
+    Visualize 2-hop neighborhood of a selected node to understand GNN selection.
+    
+    Args:
+        graph_data: PyG data object with edge_index and labels
+        all_masks: Array indicating node membership (0=Pool, 1=Train, 2=Val, 3=Test)
+        node_idx: Central node to visualize
+        iteration: Current AL iteration
+        seed: Random seed for layout
+        dataset_name: Dataset name for file naming
     """
     print(f"Plotting 2-hop neighborhood for node {node_idx}...")
 
@@ -149,30 +197,49 @@ def plot_gnn_neighborhood(graph_data, all_masks, node_idx, iteration, seed, data
 
 
 def build_set_inclusion_mask(self, graph_data):
-        """
-        Builds the mask for the purpose of plotting the kNN 2-hop neighborhood
-        graph for a node
-
-        Pool -> 0
-        Train -> 1
-        Val -> 2
-        Test -> 3
-        """
-        all_masks = np.zeros(self.total_size, dtype=int)
-        all_masks[graph_data.train_mask.cpu().numpy()] = 1
-        all_masks[graph_data.valid_mask.cpu().numpy()] = 2
-        all_masks[graph_data.test_mask.cpu().numpy()]  = 3
-        return all_masks
+    """
+    Build mask array for node visualization.
+    
+    Maps nodes to their dataset split:
+        0: Pool (unlabeled)
+        1: Train
+        2: Validation
+        3: Test
+    
+    Args:
+        graph_data: PyG data object with split masks
+    
+    Returns:
+        Array of mask values for each node
+    """
+    all_masks = np.zeros(self.total_size, dtype=int)
+    all_masks[graph_data.train_mask.cpu().numpy()] = 1
+    all_masks[graph_data.valid_mask.cpu().numpy()] = 2
+    all_masks[graph_data.test_mask.cpu().numpy()]  = 3
+    return all_masks
         
 
 def plot_tsne_embeddings(embeddings, labels, train_indices, iteration, dataset_name, criterion, seed):
+    """
+    Create t-SNE visualization of embeddings with selected samples highlighted.
+    
+    Args:
+        embeddings: Feature embeddings [N, D]
+        labels: Class labels [N]
+        train_indices: Indices of selected training samples
+        iteration: Current AL iteration
+        dataset_name: Dataset name
+        criterion: Selection strategy used
+        seed: Random seed
+    """
     emb_np = embeddings.detach().cpu().numpy()
     labels_np = labels.cpu().numpy()
 
+    # Mark training samples
     train_mask = np.zeros(len(labels_np), dtype=bool)
     train_mask[np.array(train_indices)] = True
 
-    # compute tSNE
+    # Compute t-SNE projection
     tsne = TSNE(
         n_components=2,
         perplexity=30,
@@ -219,7 +286,14 @@ def plot_tsne_embeddings(embeddings, labels, train_indices, iteration, dataset_n
 
 def edge_homophily(edge_index, y):
     """
-    Calculates edge-homophily score for the graph
+    Calculate edge homophily: fraction of edges connecting same-class nodes.
+    
+    Args:
+        edge_index: Edge list [2, E]
+        y: Node labels [N]
+    
+    Returns:
+        Edge homophily score (0-1)
     """
     src, dst = edge_index
     return (y[src] == y[dst]).float().mean().item()
@@ -227,20 +301,26 @@ def edge_homophily(edge_index, y):
 
 def node_homophily(edge_index, y):
     """
-    Calculates node-homophily score for the graph
+    Calculate node homophily: average fraction of same-class neighbors.
+    
+    Args:
+        edge_index: Edge list [2, E]
+        y: Node labels [N]
+    
+    Returns:
+        Node homophily score (0-1)
     """
     src, dst = edge_index
     N = y.size(0)
 
-    # accumulate
+    # Count same-class neighbors for each node
     same = torch.zeros(N)
     deg = torch.zeros(N)
-
     for u, v in zip(src, dst):
         same[u] += (y[u] == y[v]).float()
         deg[u] += 1
     
-    # avoid divide-by-zero
+    # Average over nodes with edges
     mask = deg > 0
     return (same[mask] / deg[mask]).mean().item()
 
@@ -249,7 +329,15 @@ def plot_homophily(edge_hom_margin, edge_hom_gnn,
                    node_hom_margin, node_hom_gnn, 
                    data_name, seed):
     """
-    Plot edge and node homophily across iterations
+    Compare homophily metrics between margin and GNN strategies.
+    
+    Args:
+        edge_hom_margin: Edge homophily scores for margin
+        edge_hom_gnn: Edge homophily scores for GNN
+        node_hom_margin: Node homophily scores for margin
+        node_hom_gnn: Node homophily scores for GNN
+        data_name: Dataset name
+        seed: Random seed
     """
     out_dir = f'plots/homo_plots'
     os.makedirs(out_dir, exist_ok=True)
@@ -287,15 +375,17 @@ def plot_homophily(edge_hom_margin, edge_hom_gnn,
     plt.close()
 
 
-def plot_uncertainty_side_by_side(
-    uncert_margin_by_iter,
-    uncert_gnn_by_iter,
-    dataset,
-    seed,
-    snapshot_step=5
-):
+def plot_uncertainty_side_by_side(uncert_margin_by_iter, uncert_gnn_by_iter,
+    dataset, seed, snapshot_step=5):
     """
-    For iterations 1,5,10,15,... plot side-by-side histograms of uncertainties (pure margin vs. GNN margin)
+    Compare uncertainty distributions between strategies at key iterations.
+    
+    Args:
+        uncert_margin_by_iter: List of margin uncertainties per iteration
+        uncert_gnn_by_iter: List of GNN uncertainties per iteration
+        dataset: Dataset name
+        seed: Random seed
+        snapshot_step: Plot every N iterations
     """
     os.makedirs("plots", exist_ok=True)
     snapshot_iters = [i for i in range(20) if (i + 1) % snapshot_step == 0 or i == 0]
@@ -306,23 +396,21 @@ def plot_uncertainty_side_by_side(
 
         fig, axes = plt.subplots(1, 2, figsize=(12, 4), sharey=True)
 
-        # Margin side
+        # Margin distribution
         axes[0].hist(um, bins=40, density=True, alpha=0.8)
         axes[0].set_title(f"Pure Margin, iter {i+1}")
         axes[0].set_xlabel("Uncertainty score")
         axes[0].set_ylabel("Density")
         axes[0].grid(True, alpha=0.3)
 
-        # GNN side
+        # GNN distribution
         axes[1].hist(ug, bins=40, density=True, alpha=0.8)
         axes[1].set_title(f"GNN Margin, iter {i+1}")
         axes[1].set_xlabel("Uncertainty score")
         axes[1].grid(True, alpha=0.3)
 
-        fig.suptitle(
-            f"Uncertainty distributions @ iteration {i+1}\n"
-            f"Dataset = {dataset}, Seed = {seed}"
-        )
+        fig.suptitle(f"Uncertainty distributions @ iteration {i+1}\n"
+                     f"Dataset = {dataset}, Seed = {seed}")
         fig.tight_layout(rect=[0, 0.03, 1, 0.95])
 
         fname = f"plots/uncert_side_by_side/data={dataset}_seed={seed}_iter={i+1}.png"
