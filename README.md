@@ -116,16 +116,6 @@ python pipeline.py \
 | `--model_name` | Base model architecture | lstm |
 | `--fine_tune` | Enable fine-tuning | False |
 
-## 📈 Results
-
-Our experiments show that GNN-based active learning consistently outperforms traditional uncertainty-based methods:
-
-| Dataset | Metric | Random | Margin | Entropy | **GNN-AL (Ours)** |
-|---------|--------|--------|--------|---------|-------------------|
-| CIFAR-10 | Accuracy @ 20% | 65.2% | 70.1% | 68.5% | **72.8%** |
-| IMDB | Accuracy @ 20% | 75.3% | 82.4% | 80.1% | **85.2%** |
-| DryBean | Accuracy @ 20% | 80.1% | 85.3% | 83.7% | **87.9%** |
-
 ## 📊 Evaluation Metrics
 
 The framework provides comprehensive analysis through:
