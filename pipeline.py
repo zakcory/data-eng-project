@@ -480,8 +480,8 @@ if __name__ == '__main__':
     parser.add_argument("--log_every", type=int, default=25)
 
     # Model and dataset name and path
-    parser.add_argument('--model_name', type=str, default="lstm")
-    parser.add_argument('--dataset_name', type=str, default="IMDB")
+    parser.add_argument('--model_name', type=str, default="beannet")
+    parser.add_argument('--dataset_name', type=str, default="drybean")
 
     # LSTM-specific parameters
     parser.add_argument("--embedding_dim", type=int, default=128, help="Dimension for word embeddings")
@@ -500,7 +500,7 @@ if __name__ == '__main__':
     hp = parser.parse_args()
 
     # Initialize training configuration
-    train_config = TrainConfig(hp.epochs, hp.gnn_epochs, hp.lr, hp.weight_decay, hp.momentum, hp.batch_size, hp.ckpt_dir, hp.log_every, hp.device, hp.model_name)
+    train_config = TrainConfig(hp.epochs, hp.gnn_epochs, hp.lr, hp.weight_decay, hp.momentum, hp.batch_size, hp.log_every, hp.device, hp.model_name)
 
     # Load dataset
     x, y, data_meta = load_dataset_wrapper(hp.dataset_name)
