@@ -327,20 +327,18 @@ def train_deep_model(model, x_train, y_train, x_val, y_val, cfg, fine_tune, firs
 
     return loss_steps, best_model
 
-
+@dataclass
 class TrainConfig:
     """Training configuration container."""
-
-    def __init__(self, epochs, gnn_epochs, lr, weight_decay, momentum, batch_size, log_every, device, model_name):
-        self.epochs = epochs
-        self.gnn_epochs = gnn_epochs
-        self.lr = lr
-        self.weight_decay = weight_decay
-        self.momentum = momentum
-        self.batch_size = batch_size
-        self.log_every = log_every
-        self.device = device
-        self.model_name = model_name
+    epochs: int
+    gnn_epochs: int
+    lr: float
+    weight_decay: float
+    momentum: float
+    batch_size: int
+    log_every: int
+    device: str
+    model_name: str
     def __repr__(self):
         return f"Train Config: epochs={self.epochs}, lr={self.lr}, bs={self.batch_size}, log every {self.log_every}"
 

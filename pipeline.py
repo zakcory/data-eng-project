@@ -500,7 +500,9 @@ if __name__ == '__main__':
     hp = parser.parse_args()
 
     # Initialize training configuration
-    train_config = TrainConfig(hp.epochs, hp.gnn_epochs, hp.lr, hp.weight_decay, hp.momentum, hp.batch_size, hp.log_every, hp.device, hp.model_name)
+    train_config = TrainConfig(epochs=hp.epochs, gnn_epochs=hp.gnn_epochs, lr=hp.lr, weight_decay=hp.weight_decay,\
+                                momentum=hp.momentum, batch_size=hp.batch_size, log_every=hp.log_every,\
+                                device=hp.device, model_name=hp.model_name)
 
     # Load dataset
     x, y, data_meta = load_dataset_wrapper(hp.dataset_name)
