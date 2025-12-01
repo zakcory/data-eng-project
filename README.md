@@ -40,6 +40,8 @@ git clone https://github.com/zakcory/data-eng-project
 cd data-eng-project
 
 # Install dependencies
+python -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 
 # Download NLTK data (for IMDB)
