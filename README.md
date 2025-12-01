@@ -1,9 +1,9 @@
 
 # GNN-based Active Learning Framework
 
-**Data Analysis and Visualization - 940295**  
+**Data Lab 2 - 0940295**  
 **Technion - Israel Institute of Technology**  
-**Team Members**: Zack, Mike, Dan Amler
+**Team Members**: Zakhar Manikhas, Mikhail Gruntov, Dan Amler
 
 ## 📋 Abstract
 
@@ -32,7 +32,6 @@ We propose a GNN-based active learning framework that:
 ### Prerequisites
 - Python 3.8+
 - CUDA-capable GPU (recommended)
-- 8GB+ RAM
 
 ### Quick Start
 ```bash
@@ -46,7 +45,7 @@ pip install -r requirements.txt
 # Download NLTK data (for IMDB)
 python -c "import nltk; nltk.download('stopwords')"
 
-# Run default experiment
+# To run a default experiment
 python pipeline.py
 ```
 
@@ -59,54 +58,26 @@ data-eng-project/
 ├── factories.py        # Factory patterns for modularity
 ├── utils.py           # Visualization and utility functions
 ├── report.pdf         # Project report
-└── README.md          # This file
 ```
 
 ## 🚀 Running Experiments
 
-### Basic Experiment
+### Running manually crafted expiremnents
 
-Run the default experiment (IMDB dataset with LSTM):
-```bash
-python pipeline.py
-```
+You can run the pipeline for any dataset–model pair by specifying the dataset, model, and any relevant training options.
 
-### Custom Experiments
-
-#### 1. CIFAR-10 with ResNet18 (Fine-tuning enabled)
 ```bash
 python pipeline.py \
-    --dataset_name cifar10 \
-    --model_name resnet18 \
-    --epochs 200 \
-    --batch_size 128 \
-    --fine_tune \
-    --device cuda
+    --dataset_name <DATASET> \
+    --model_name <MODEL> \
+    [OPTIONS]
 ```
 
-#### 2. DryBean with MLP (Full retraining)
-```bash
-python pipeline.py \
-    --dataset_name drybean \
-    --model_name beannet \
-    --epochs 100 \
-    --batch_size 64 \
-    --device cuda
-```
+Supported datasets: cifar10, drybean, IMDB
 
-#### 3. IMDB with LSTM (Custom architecture)
-```bash
-python pipeline.py \
-    --dataset_name IMDB \
-    --model_name lstm \
-    --embedding_dim 256 \
-    --hidden_dim 512 \
-    --n_layers 3 \
-    --fine_tune \
-    --device cuda
-```
+Supported models:   resnet18 (CNN), beannet (MLP), lstm (LSTM)
 
-### Key Parameters
+#### Key Parameters
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
@@ -116,6 +87,12 @@ python pipeline.py \
 | `--model_name` | Base model architecture | lstm |
 | `--fine_tune` | Enable fine-tuning | False |
 
+### Running expirements using ready-to-go script
+
+The repository includes a convenience script (`run_all_expirements.sh`) that launches all fine-tuning experiments with predefined settings.  
+It automatically activates the environment, configures deterministic CUDA options, and runs the pipeline for DryBean, IMDB, and CIFAR-10.  
+Simply execute the script to reproduce all fine-tuning experiments in one step.
+
 ## 📊 Evaluation Metrics
 
 The framework provides comprehensive analysis through:
@@ -124,33 +101,4 @@ The framework provides comprehensive analysis through:
 - **t-SNE visualizations**: Embedding space evolution
 - **Uncertainty distributions**: Comparison of selection strategies
 
-## 🔬 Methodology
-
-### Graph Construction
-- Build k-NN graph (k=10) using cosine similarity on embeddings
-- Symmetrize edges for undirected graph
-- Recompute graph each AL iteration
-
-### GNN Label Propagation
-- 2-layer GraphSAGE with 1024 hidden dimensions
-- Train for 500 epochs with early stopping
-- Semi-supervised learning on labeled nodes
-
-### Selection Strategies Compared
-- **Random**: Baseline uniform sampling
-- **Least Confidence**: 1 - max(P(y|x))
-- **Margin**: P(y₁|x) - P(y₂|x)
-- **Entropy**: -Σ P(y|x)log P(y|x)
-- **GNN-AL**: Our proposed method
-
-## 📚 References
-
-- Hamilton et al. "Inductive Representation Learning on Large Graphs" (GraphSAGE)
-- Settles, B. "Active Learning Literature Survey"
-- Kipf & Welling "Semi-Supervised Classification with Graph Convolutional Networks"
-
-## 👥 Team Members
-
-- [Student Name 1] - [Email/ID]
-- [Student Name 2] - [Email/ID]
-- [Student Name 3] - [Email/ID]
+After running the expirements, all of the above will be under the `plots` directory

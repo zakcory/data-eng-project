@@ -1,5 +1,4 @@
 .gitignore
-toy_dataset/*
 data/*
 __pycache__/*
-ckpts/*
+saved_accs/*.pkl

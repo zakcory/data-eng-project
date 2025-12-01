@@ -477,7 +477,6 @@ if __name__ == '__main__':
     parser.add_argument("--weight_decay", type=float, default=5e-4)
     parser.add_argument("--momentum", type=float, default=0.9)
     parser.add_argument("--batch_size", type=int, default=64)
-    parser.add_argument("--ckpt_dir", type=str, default="./ckpts")
     parser.add_argument("--log_every", type=int, default=25)
 
     # Model and dataset name and path

@@ -37,7 +37,7 @@ def generate_plot(accuracy_scores_dict, seed, dataset_name):
     plt.title(f'AL - Accuracy vs. Iterations, Seed: {seed}, Dataset: {dataset_name}, FT')
 
     # Save and close figure
-    plt.savefig(f'plot_{seed}_{dataset_name}_FT')
+    plt.savefig(f'plots/accplot_{seed}_{dataset_name}')
     plt.close()
 
 
@@ -51,11 +51,9 @@ def seed_all(seed):
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
-
-    # Disable cudnn benchmark for deterministic behavior (trades speed for reproducibility)
-    # torch.backends.cudnn.deterministic = True  # Forces deterministic algorithms (slower but fully reproducible)
-    torch.backends.cudnn.benchmark = False  # Disables auto-tuning (more reproducible, slightly slower)
-    # torch.use_deterministic_algorithms(True)  # Strictest setting - may error on non-deterministic ops
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    torch.use_deterministic_algorithms(True)
 
 
 def build_knn_graph(embeddings: torch.Tensor, k: int = 10, symmetrize: bool = True) -> torch.LongTensor:
@@ -160,7 +158,6 @@ def plot_gnn_neighborhood(graph_data, all_masks, node_idx, iteration, seed, data
 
     # --- 3. Prepare colors and numeric labels ---
     mask_map   = {0: 'lightgray', 1: 'blue', 2: 'orange', 3: 'red'}
-    mask_names = {0: 'Pool', 1: 'Train', 2: 'Val', 3: 'Test'}
 
     # Use numeric labels directly from graph_data.y
     labels = graph_data.y.cpu().numpy()
