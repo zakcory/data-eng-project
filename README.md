@@ -51,6 +51,8 @@ python -c "import nltk; nltk.download('stopwords')"
 python pipeline.py
 ```
 
+Download the IMDB and DryBean datasets `.csv` files through Kaggle. Links are inside the [Data description](data/DATA.md)
+
 ## 📁 Project Structure
 ```
 data-eng-project/
