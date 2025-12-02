@@ -87,9 +87,11 @@ Supported models:   resnet18 (CNN), beannet (MLP), lstm (LSTM)
 |-----------|-------------|---------|
 | `--iterations` | Number of AL rounds | 20 |
 | `--budget_per_iter_ratio` | Fraction of data labeled per round | 0.01 |
-| `--dataset_name` | Dataset to use (cifar10/IMDB/drybean) | IMDB |
-| `--model_name` | Base model architecture | lstm |
+| `--dataset_name` | Dataset to use (cifar10/IMDB/drybean) | drybean |
+| `--model_name` | Base model architecture (resnet18/lstm/beanet) | beannet |
 | `--fine_tune` | Enable fine-tuning | False |
+
+The default `dataset_name` and `model_name` are for the Bean Dataset because it runs rather quickly (if you do have a GPU)
 
 ### Running expirements using ready-to-go script
 
